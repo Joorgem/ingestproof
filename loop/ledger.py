@@ -6,8 +6,13 @@ circular defect v1 of the design had. `LOOP.md` inside the repository is a *rend
 this file, never the source, and the harness writes here directly so the agent's editor
 never touches it.
 
-Each entry carries the SHA-256 of the one before it, so editing, reordering or removing an
-entry is detectable from the file alone.
+Each entry carries the SHA-256 of the one before it, so editing an entry, reordering
+entries, or removing one from the MIDDLE is detectable from the file alone.
+
+Two things are not, and the difference matters: truncating the TAIL, and re-computing every
+hash from genesis. Neither is visible from inside the file, because a chain is only as
+anchored as its tip. Both are caught by comparing against a tip quoted somewhere outside --
+LOOP.md, a pull-request body, the README's published split. Quote the tip when it matters.
 """
 from __future__ import annotations
 
