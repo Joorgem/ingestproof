@@ -76,7 +76,7 @@ strict = true
 # and then disagrees with the interpreter about every import.
 mypy_path = "src"
 explicit_package_bases = true
-files = ["src", "loop"]
+files = ["src", "loop", "tools"]
 
 [tool.coverage.run]
 branch = true

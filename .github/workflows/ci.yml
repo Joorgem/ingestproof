@@ -36,6 +36,15 @@ jobs:
       - name: Install
         run: uv sync --all-groups
 
+      - name: Frozen paths have not drifted
+        run: uv run python -m tools.freeze_check verify
+
+      - name: No pull request may change a frozen path
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags origin "${{ github.base_ref }}"
+          uv run python -m tools.freeze_check diff --base "origin/${{ github.base_ref }}"
+
       - name: Lint
         run: uv run ruff check .
 

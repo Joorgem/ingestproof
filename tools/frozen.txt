@@ -1,0 +1,21 @@
+# The frozen set (spec section 7.3). One glob per line, repo-relative, forward slashes.
+#
+# It lists ITSELF and freeze_check.py, and that is not decoration: a manifest whose own
+# path is writable is a manifest anyone can regenerate after editing what it guards. The
+# mechanical closure is in CI -- a pull request whose diff touches any line below fails,
+# with no override token. A frozen path changes by a human pushing to main, and the loop
+# cannot push to main because it does not merge (spec section 7.10).
+tools/**
+loop/**
+pyproject.toml
+uv.lock
+.python-version
+.gitattributes
+.github/**
+.spec/**
+tests/acceptance/**
+tests/conftest.py
+TASKS.md
+prompt.md
+CLAUDE.md
+AGENTS.md
