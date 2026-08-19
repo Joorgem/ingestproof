@@ -1,0 +1,44 @@
+# .github/workflows/ci.yml
+#
+# CI IS THE AUTHORITATIVE GATE, NOT THE LAPTOP. And it only fires on `push: main` and
+# `pull_request` -- pushing a feature branch runs nothing at all. That cost the flagship
+# a session; it is written here so it does not cost this repository one.
+name: CI
+
+on:
+  push: { branches: [main] }
+  pull_request:
+
+# The commit-1 manifest (spec section 7.12), exported once for every job.
+env:
+  PYTHONHASHSEED: "0"
+  TZ: UTC
+  LC_ALL: C.UTF-8
+  CI: "true"
+
+jobs:
+  inner:
+    name: inner ring
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # freeze_check.py's `diff` mode needs the base commit, and a depth-1 checkout
+          # does not have it.
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: uv sync --all-groups
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Types
+        run: uv run mypy
+
+      - name: Inner-ring tests
+        run: uv run pytest -v
