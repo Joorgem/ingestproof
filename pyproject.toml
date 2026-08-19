@@ -60,7 +60,11 @@ markers = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = ["src", "tools", "loop", "tests"]
+# The project ROOT must stay in this list. Ruff's default is [project_root, "src"],
+# which resolves both layouts; naming the subdirectories instead REMOVES the root, and
+# then `loop.ledger` and `tools.freeze_check` are classified third-party and I001
+# rewrites every import block to match that lie.
+src = [".", "src"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
