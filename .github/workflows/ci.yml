@@ -27,7 +27,9 @@ jobs:
           # does not have it.
           fetch-depth: 0
 
-      - uses: astral-sh/setup-uv@v10
+      # setup-uv stopped publishing floating major tags after v7: `@v10` does not
+      # resolve and the run fails at "Set up job". v10.0.1 is the exact v10 release.
+      - uses: astral-sh/setup-uv@v10.0.1
         with:
           python-version: "3.12"
 
