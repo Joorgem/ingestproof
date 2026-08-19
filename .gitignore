@@ -11,3 +11,4 @@ build/
 vendor/
 htmlcov/
 .coverage
+oft-report.txt

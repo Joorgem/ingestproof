@@ -45,6 +45,12 @@ jobs:
           git fetch --no-tags origin "${{ github.base_ref }}"
           uv run python -m tools.freeze_check diff --base "origin/${{ github.base_ref }}"
 
+      - name: Every criterion declares Needs
+        run: uv run python -m tools.needs_check
+
+      - name: No criterion text moved without its revision
+        run: uv run python -m tools.spec_hashes verify
+
       - name: Lint
         run: uv run ruff check .
 
