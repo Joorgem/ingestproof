@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from tools.freeze_check import (
+    _changed_since,
     frozen_globs,
     frozen_paths,
     hash_file,
@@ -112,3 +113,30 @@ def test_the_hash_is_over_bytes_not_text(fake_repo: Path) -> None:
     lf.write_bytes(b"a\nb\n")
 
     assert hash_file(crlf) != hash_file(lf)
+
+
+def test_diff_mode_reads_the_repository_at_root_not_the_caller_cwd(
+    fake_repo: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # `--root` is only honest if the git invocation carries cwd=root. Standing in a
+    # DIFFERENT repository is the only way to tell the two apart: without cwd=root the
+    # function reports the caller's changes and never looks at `root` at all.
+    (fake_repo / "tests" / "acceptance" / "test_a.py").write_text("x = 99\n", encoding="utf-8")
+    _git(fake_repo, "git", "add", "-A")
+    _git(fake_repo, "git", "commit", "-m", "touch a frozen path")
+
+    caller = tmp_path_factory.mktemp("caller_repo")
+    _git(caller, "git", "init", "-b", "main")
+    _git(caller, "git", "config", "user.email", "test@example.invalid")
+    _git(caller, "git", "config", "user.name", "test")
+    (caller / "unrelated.py").write_text("a = 1\n", encoding="utf-8")
+    _git(caller, "git", "add", "-A")
+    _git(caller, "git", "commit", "-m", "base")
+    (caller / "unrelated.py").write_text("a = 2\n", encoding="utf-8")
+    _git(caller, "git", "add", "-A")
+    _git(caller, "git", "commit", "-m", "an unrelated change the gate must not report")
+    monkeypatch.chdir(caller)
+
+    assert _changed_since("HEAD~1", fake_repo) == ["tests/acceptance/test_a.py"]

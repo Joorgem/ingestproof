@@ -106,10 +106,14 @@ def offending_paths(root: Path, changed: Sequence[str]) -> list[str]:
     return sorted({rel for rel in changed if rel and any(_matches(rel, g) for g in globs)})
 
 
-def _changed_since(base: str) -> list[str]:
+def _changed_since(base: str, root: Path) -> list[str]:
     out = subprocess.run(
         ("git", "diff", "--name-only", f"{base}...HEAD"),
-        check=True, capture_output=True, text=True,
+        # cwd=root, not the process's working directory: without it `--root` is a lie,
+        # and the mode silently reports on whatever repository the caller happens to be
+        # standing in. CI runs from the repo root, so the bug would never have surfaced
+        # there -- which is exactly why it is worth closing now.
+        cwd=root, check=True, capture_output=True, text=True,
     )
     return [line.strip() for line in out.stdout.splitlines() if line.strip()]
 
@@ -137,7 +141,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"{len(frozen_paths(root))} frozen paths verified")
         return 0
 
-    offending = offending_paths(root, _changed_since(args.base))
+    offending = offending_paths(root, _changed_since(args.base, root))
     if offending:
         print(
             "This pull request changes frozen paths. There is no override:\n"
