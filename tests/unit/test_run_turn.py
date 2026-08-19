@@ -60,11 +60,21 @@ def test_an_empty_diff_that_fails_is_indeterminate() -> None:
     ) == "INDETERMINATE"
 
 
-def test_a_timeout_on_a_test_that_was_green_before_is_indeterminate() -> None:
+def test_a_timeout_on_a_green_test_whose_diff_is_docs_only_is_indeterminate() -> None:
+    # The spec's "sob o mesmo codigo": green before AND the code did not move.
+    assert classify(
+        tests_passed=False, timed_out=True, changed_paths=["docs/design.md"],
+        test_was_green_before=True,
+    ) == "INDETERMINATE"
+
+
+def test_a_hang_introduced_in_src_does_not_escape_as_indeterminate() -> None:
+    # The escape the guard closes. Convert a failure into an infinite loop against a green
+    # baseline and, without the diff check, the turn is never undone.
     assert classify(
         tests_passed=False, timed_out=True, changed_paths=["src/ingestproof/x.py"],
         test_was_green_before=True,
-    ) == "INDETERMINATE"
+    ) == "TIMEOUT"
 
 
 def test_any_other_timeout_is_a_timeout() -> None:

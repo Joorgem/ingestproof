@@ -42,16 +42,28 @@ def classify(
     """Spec section 7.5, as a pure function so it can be argued with in a test.
 
     GREEN          the ring passed.
-    INDETERMINATE  a timeout on a test that was green under the previous commit, or a red
-                   whose diff touched nothing but docs/** and LOOP.md. Both mean the
-                   environment moved rather than the code, and both stop the loop.
-    TIMEOUT        any other timeout.
+    INDETERMINATE  the environment moved rather than the code. Two doors in, and BOTH
+                   require the diff to be documentation-only: a red that touched nothing
+                   but docs/** and LOOP.md, or a timeout on a test that was green under
+                   the previous commit AND under the same code. Stops the loop.
+    TIMEOUT        any other timeout. Its disposition is RED's -- UNDO. It stays a
+                   separate recorded outcome only so the ledger can tell a hang from a
+                   failure; it is not a softer verdict.
     RED            anything else. Undo.
+
+    The `diff_is_documentation_only` guard on the timeout branch is the spec's "sob o
+    mesmo codigo" clause, and it is load-bearing. Without it, a turn escapes by converting
+    its failure into a hang: timing out against a green baseline would read as
+    INDETERMINATE and the broken diff would survive in the tree. That is the same
+    argue-your-way-out shape the closed set exists to prevent, coming through a different
+    door.
     """
     if tests_passed and not timed_out:
         return "GREEN"
     if timed_out:
-        return "INDETERMINATE" if test_was_green_before else "TIMEOUT"
+        if test_was_green_before and diff_is_documentation_only(changed_paths):
+            return "INDETERMINATE"
+        return "TIMEOUT"
     if diff_is_documentation_only(changed_paths):
         return "INDETERMINATE"
     return "RED"
@@ -84,11 +96,14 @@ def stall_report(entries: Sequence[dict[str, object]], limit: int = STALL_LIMIT)
     stalled = turns_since_close(entries)
     if stalled < limit:
         return None
-    recent = list(entries)[-limit:]
+    # Slice by `stalled`, not by `limit`: the headline counts the stalled turns, so listing
+    # a different number of them makes the report disagree with itself at exactly the
+    # moment a human is reading it to work out why the loop stopped.
+    recent = list(entries)[-stalled:]
     lines = [
         f"STOPPED: {stalled} consecutive turns closed no criterion (limit {limit}).",
         "",
-        "The last turns, and what each attempted:",
+        f"All {stalled}, and what each attempted:",
         "",
     ]
     lines += [

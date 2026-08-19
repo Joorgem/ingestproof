@@ -44,7 +44,11 @@ def render(entries: list[dict[str, Any]]) -> str:
 def main() -> int:
     entries = read_all()
     verify_chain(entries)
-    Path("LOOP.md").write_text(render(entries), encoding="utf-8", newline="\n")
+    # Anchored to the repository root, not the working directory: LOOP.md has exactly one
+    # correct location, and a mislocated render would leave a stray view file that reads
+    # like the real thing.
+    target = Path(__file__).resolve().parents[1] / "LOOP.md"
+    target.write_text(render(entries), encoding="utf-8", newline="\n")
     return 0
 
 
