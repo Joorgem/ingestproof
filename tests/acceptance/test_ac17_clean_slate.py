@@ -98,3 +98,10 @@ def test_clean_spares_the_virtualenv(repo: Path) -> None:
 
     assert (venv / "marker").exists(), "-e .venv must survive; reinstalling every turn is the cost"
     assert not (repo / "junk.txt").exists()
+
+
+def test_the_runner_has_not_weakened_the_clean_slate() -> None:
+    from loop import run_turn
+
+    assert run_turn.RESET == RESET
+    assert run_turn.CLEAN == CLEAN
