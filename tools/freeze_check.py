@@ -29,6 +29,9 @@ def frozen_globs(root: Path) -> list[str]:
 
 
 def _matches(rel: str, glob: str) -> bool:
+    # Only two shapes are used: "dir/**" and a bare filename. A single-star glob would
+    # over-match, because fnmatch's * spans "/" -- inert today, and safe in direction
+    # (it blocks more, never less), but do not add one without handling it.
     if glob.endswith("/**"):
         return rel.startswith(glob[:-2])
     return fnmatch(rel, glob)
@@ -78,7 +81,7 @@ def _read_manifest(root: Path) -> dict[str, str]:
         return {}
     out: dict[str, str] = {}
     for line in target.read_text(encoding="utf-8").splitlines():
-        if not line.strip() or line.startswith("#"):
+        if not line.strip() or line.lstrip().startswith("#"):
             continue
         digest, rel = line.split("  ", 1)
         out[rel] = digest
@@ -108,7 +111,12 @@ def offending_paths(root: Path, changed: Sequence[str]) -> list[str]:
 
 def _changed_since(base: str, root: Path) -> list[str]:
     out = subprocess.run(
-        ("git", "diff", "--name-only", f"{base}...HEAD"),
+        # --no-renames is load-bearing. Git's rename detection collapses a move to its
+        # POST-image only, so renaming a frozen file into a writable path (a pure R100
+        # move of tests/acceptance/x.py to src/x.py) names only src/x.py -- the frozen
+        # path never appears and this mode passes. Worse, testpaths is ["tests"], so the
+        # moved acceptance test also stops being collected. Verified both ways.
+        ("git", "diff", "--name-only", "--no-renames", f"{base}...HEAD"),
         # cwd=root, not the process's working directory: without it `--root` is a lie,
         # and the mode silently reports on whatever repository the caller happens to be
         # standing in. CI runs from the repo root, so the bug would never have surfaced

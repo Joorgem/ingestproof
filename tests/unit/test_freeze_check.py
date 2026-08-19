@@ -140,3 +140,19 @@ def test_diff_mode_reads_the_repository_at_root_not_the_caller_cwd(
     monkeypatch.chdir(caller)
 
     assert _changed_since("HEAD~1", fake_repo) == ["tests/acceptance/test_a.py"]
+
+
+def test_a_frozen_path_renamed_into_a_writable_one_is_still_offending(fake_repo: Path) -> None:
+    """Git collapses a rename to its post-image, so `git diff --name-only` alone would
+    name only the destination. A pure move of a frozen acceptance test into src/ would
+    then pass the diff gate -- and stop being collected, since testpaths is ["tests"].
+    `--no-renames` is what keeps the source path visible."""
+    _git(fake_repo, "git", "mv", "tests/acceptance/test_a.py", "src_moved.py")
+    _git(fake_repo, "git", "commit", "-m", "move a frozen file out")
+
+    changed = _changed_since("HEAD~1", fake_repo)
+
+    assert "tests/acceptance/test_a.py" in changed, (
+        "rename detection hid the frozen source path; --no-renames is missing"
+    )
+    assert offending_paths(fake_repo, changed) == ["tests/acceptance/test_a.py"]
