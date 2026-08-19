@@ -21,7 +21,7 @@ jobs:
     name: inner ring
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # freeze_check.py's `diff` mode needs the base commit, and a depth-1 checkout
           # does not have it.
@@ -43,4 +43,6 @@ jobs:
         run: uv run mypy
 
       - name: Inner-ring tests
-        run: uv run pytest -v
+        # No -v: `addopts = "-q"` in pyproject cancels it, so it reads as verbosity CI
+        # does not have. Evidence comes from the count line and the skip-to-pass transition.
+        run: uv run pytest
