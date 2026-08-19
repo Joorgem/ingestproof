@@ -1,0 +1,89 @@
+[build-system]
+requires = ["hatchling==1.32.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ingestproof"
+version = "0.0.1"
+description = "A bronze ingestion is a contract -- and a proof that the parse did not lie."
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Jorge Medeiros" }]
+# NO UPPER CAP. The development interpreter is pinned to 3.12 by .python-version and by
+# uv.lock; capping `requires-python` would additionally forbid every consumer on 3.13+
+# from installing, which AC-10 would then be measuring as a success.
+requires-python = ">=3.12"
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Database",
+  "Typing :: Typed",
+]
+# ASM-8: the oracle version is pinned EXACTLY in uv.lock and asserted by
+# tests/unit/test_manifest.py. A `==` here would be a resolution deadlock for anyone
+# who installs this next to another DuckDB consumer.
+dependencies = ["duckdb>=1.5.5,<1.6"]
+
+[project.urls]
+Homepage = "https://github.com/Joorgem/ingestproof"
+Issues = "https://github.com/Joorgem/ingestproof/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ingestproof"]
+
+[dependency-groups]
+dev = [
+  "hypothesis>=6.140,<7",
+  "mypy>=1.18,<2",
+  "pytest>=8.4,<9",
+  "pytest-cov>=7.0,<8",
+  "pytest-timeout==2.4.0",
+  "ruff>=0.14,<0.15",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# --strict-markers: a typo in a marker name must fail, not silently deselect.
+# --timeout: spec section 7.5 makes TIMEOUT a distinct turn outcome; it needs a per-test
+# clock to exist at all.
+addopts = "-q --strict-markers --timeout=60 -m 'not external and not nightly'"
+# REQUIRED, not cosmetic. Without it pytest puts tests/unit on sys.path (the first parent
+# with no __init__.py) and never the repository root, so `from tools.freeze_check import ...`
+# and `from loop.ledger import ...` both fail with ModuleNotFoundError.
+pythonpath = ["."]
+markers = [
+  "external: needs the network or a published artefact; never part of the inner ring",
+  "nightly: the nightly ring -- large fixtures, the real corpus, the JVM",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tools", "loop", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+# src layout: without mypy_path, mypy reads src/ingestproof as the package `src.ingestproof`
+# and then disagrees with the interpreter about every import.
+mypy_path = "src"
+explicit_package_bases = true
+files = ["src"]
+
+[tool.coverage.run]
+branch = true
+source = ["src", "tools", "loop"]
+
+[tool.coverage.report]
+show_missing = true
+
+# Linux only -- mutmut 3 needs fork(). And it mutates INSIDE functions only, so a new
+# module-level constant in src/** produces zero mutants: any such constant needs a test
+# that asserts its value, or the gate is inert on it.
+[tool.mutmut]
+paths_to_mutate = "src/"
+tests_dir = "tests/unit/"

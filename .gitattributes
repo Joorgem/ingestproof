@@ -1,0 +1,13 @@
+# Source is LF everywhere. Fixtures are bytes, and bytes are the product.
+#
+# Measured (docs/measurements.md §7): one commit of `id,note\n1,"line A\nline B"\n2,ok\n`,
+# three clones with three `core.autocrlf` values, three DIFFERENT byte-streams -- git
+# rewrote the newline INSIDE the quoted field, which is the RFC 4180 section 2.6
+# regression fixture itself. In a library whose thesis is byte fidelity that is fatal,
+# and no test in the inner ring could have discovered it.
+* text=auto eol=lf
+
+tests/fixtures/**/*.csv   -text
+tests/fixtures/**/*.jsonl -text
+tests/fixtures/**/*.txt   -text
+tests/fixtures/**/*.bin   -text
