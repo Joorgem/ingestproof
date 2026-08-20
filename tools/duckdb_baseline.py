@@ -14,6 +14,10 @@ is malformed against its declared schema. `multiline` and `escape` it parses cor
 silently, which is section 2 arriving at its conclusion: the incidents are damage done by
 the PRODUCTION reader, not by the file, and a correct parser has nothing to reject. That
 gap is the measured size of the problem this library solves, and it opens the README.
+
+Run it as `uv run python -m tools.duckdb_baseline` from the repository root -- the module
+path needs the root on sys.path. The fixtures it reads are resolved from this file rather
+than from the working directory, so only that first hop depends on where you stand.
 """
 from __future__ import annotations
 
@@ -22,7 +26,10 @@ from pathlib import Path
 
 import duckdb
 
-INCIDENTS = Path("tests/fixtures/incidents")
+# The fixture directory has ONE definition, in the generator that writes it, anchored on
+# that file rather than on the current directory. This script reads what that module
+# wrote, so importing the location states the same fact once instead of twice.
+from tools.make_incident_fixtures import INCIDENTS
 
 CASES: tuple[tuple[str, dict[str, str]], ...] = (
     ("multiline.csv", {"id": "VARCHAR", "note": "VARCHAR"}),
@@ -41,21 +48,27 @@ def _columns_clause(columns: dict[str, str]) -> str:
 
 def probe(path: Path, columns: dict[str, str]) -> tuple[int, list[tuple[object, ...]]]:
     con = duckdb.connect()
-    # Two measured details, both load-bearing on duckdb 1.5.5, and each one on its own is
-    # enough to make the next statement raise CatalogException instead of returning rows.
-    # The subquery: a bare `SELECT count(*) FROM read_csv(...)` is optimised into the scan,
-    # which then never materialises the rejects tables at all. And `fetchall`, not
-    # `fetchone`: the tables are registered when the result is drained, and a one-row
-    # aggregate read with `fetchone` leaves it open.
-    rows = con.execute(
-        f"SELECT count(*) FROM (SELECT * FROM read_csv(?, header=true, "
-        f"columns={_columns_clause(columns)}, store_rejects=true, strict_mode=true))",
-        [str(path)],
-    ).fetchall()
-    rejects = con.execute(
-        "SELECT line, column_idx, error_type, csv_line FROM reject_errors ORDER BY line"
-    ).fetchall()
-    con.close()
+    try:
+        # Two measured details, both load-bearing on duckdb 1.5.5, and each one on its own
+        # is enough to make the next statement raise CatalogException instead of returning
+        # rows. The subquery: a bare `SELECT count(*) FROM read_csv(...)` is optimised into
+        # the scan, which then never materialises the rejects tables at all. And
+        # `fetchall`, not `fetchone`: the tables are registered when the result is drained,
+        # and a one-row aggregate read with `fetchone` leaves it open.
+        rows = con.execute(
+            f"SELECT count(*) FROM (SELECT * FROM read_csv(?, header=true, "
+            f"columns={_columns_clause(columns)}, store_rejects=true, strict_mode=true))",
+            [str(path)],
+        ).fetchall()
+        rejects = con.execute(
+            "SELECT line, column_idx, error_type, csv_line FROM reject_errors ORDER BY line"
+        ).fetchall()
+    finally:
+        # In a `finally` because both statements above raise on ordinary inputs -- a
+        # missing file, a row that violates the declared schema. The rejects tables live
+        # inside the connection, so a leak here is a leaked catalog, and the error path is
+        # exactly the one a caller is most likely to retry in a loop.
+        con.close()
     return (int(rows[0][0]) if rows else 0, rejects)
 
 
