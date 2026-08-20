@@ -1,0 +1,10 @@
+duckdb 1.5.5
+
+multiline.csv: 2 rows accepted, 0 rejected
+
+escape.csv: 1 rows accepted, 0 rejected
+
+extra_field.csv: 2 rows accepted, 1 rejected
+    line=4 col=3 TOO MANY COLUMNS: '3,4,EXTRA'
+
+clean.csv: 3 rows accepted, 0 rejected
