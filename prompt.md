@@ -15,11 +15,12 @@ unclosed** item, and do only that.
 
 `src/**`, `tests/unit/**`, `tests/property/**`, `docs/**`, and `LOOP.md`.
 
-Nothing else. `tests/acceptance/**`, `.spec/**`, `TASKS.md`, `prompt.md`, `CLAUDE.md`,
-`pyproject.toml`, `uv.lock`, `.github/**`, `.gitattributes`, `tools/**` and `loop/**` are
-frozen. A `PreToolUse` hook refuses the write, and CI fails any pull request whose diff
-names one of them. There is no override. If a frozen file is genuinely wrong, say so in
-`LOOP.md` and stop — that is a human's edit.
+Nothing else. `tests/acceptance/**`, `tests/conftest.py`, `.spec/**`, `TASKS.md`,
+`prompt.md`, `CLAUDE.md`, `pyproject.toml`, `uv.lock`, `.github/**`, `.gitattributes`,
+`.gitignore`, `LICENSE`, `README.md`, `tools/**` and `loop/**` are frozen. A `PreToolUse`
+hook refuses the write, and CI fails any pull request whose diff names one of them.
+There is no override. If a frozen file is genuinely wrong, say so in `LOOP.md` and stop
+— that is a human's edit.
 
 `tools/**` and `loop/**` are frozen because they are the gates. You do not get to edit
 your own judge.

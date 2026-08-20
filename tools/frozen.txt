@@ -10,6 +10,8 @@ loop/**
 pyproject.toml
 uv.lock
 .python-version
+LICENSE
+README.md
 .gitignore
 .gitattributes
 .github/**
