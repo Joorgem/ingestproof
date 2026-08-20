@@ -57,7 +57,7 @@ index 6666666..0000000
 """
 
 
-def test_an_addition_hunk_reports_its_new_side_lines() -> None:
+def test_an_addition_hunk_reports_the_lines_it_replaced() -> None:
     assert touched_lines(ADDITION)["src/ingestproof/reader.py"] >= {40, 45}
 
 
@@ -106,6 +106,39 @@ def test_a_multi_line_finding_overlapping_the_hunk_edge_is_resolved() -> None:
     finding = Finding("src/ingestproof/reader.py", 44, 80, "range spans out of the hunk")
 
     assert is_resolved(finding, touched_lines(ADDITION)) is True
+
+
+def test_an_insertion_above_a_finding_does_not_resolve_it() -> None:
+    """The coordinate trap, and the reason the old side alone is used.
+
+    A hunk's new-side numbers are post-fix; a finding's are review-time. Unioning both
+    let a thirty-line insertion at the top of a file mark every finding below it
+    resolved -- invisibly, and through an ordinary edit rather than an attack.
+    """
+    diff = (
+        "diff --git a/src/f.py b/src/f.py\n"
+        "--- a/src/f.py\n"
+        "+++ b/src/f.py\n"
+        "@@ -1,3 +1,33 @@\n" + "+comment\n" * 30 + " a = 1\n b = 2\n c = 3\n"
+    )
+    finding = Finding("src/f.py", 12, 14, "the insertion never touched these")
+
+    assert is_resolved(finding, touched_lines(diff)) is False
+
+
+def test_a_pure_insertion_resolves_only_at_its_anchor() -> None:
+    diff = (
+        "diff --git a/src/f.py b/src/f.py\n"
+        "--- a/src/f.py\n"
+        "+++ b/src/f.py\n"
+        "@@ -12,0 +13,2 @@\n"
+        "+    if x is None:\n"
+        "+        raise ValueError(x)\n"
+    )
+    touched = touched_lines(diff)
+
+    assert is_resolved(Finding("src/f.py", 12, 12, "missing check"), touched) is True
+    assert is_resolved(Finding("src/f.py", 40, 40, "elsewhere"), touched) is False
 
 
 def test_partition_splits_resolved_from_dismissed() -> None:

@@ -30,11 +30,27 @@ def _strip_prefix(raw: str) -> str | None:
 
 
 def touched_lines(diff_text: str) -> dict[str, set[int]]:
-    """Lines this diff writes over, per path -- BOTH sides of every hunk.
+    """Lines this diff writes over, per path, in REVIEW-TIME coordinates.
 
-    Both sides, because a finding cites the file as it stood at review time: a fix that
-    deletes the offending lines produces a hunk whose new-side length is zero, and
-    matching only the new side would score that as unresolved.
+    A finding cites the file as it stood when the reviewer read it, which is the diff's
+    OLD side. The new side is post-fix and must not be mixed in. Unioning both let a
+    thirty-line insertion at the top of a file mark every finding below it resolved,
+    because the new-side range swept coordinates the fix never touched -- the invisible
+    false-resolve this module exists to prevent, reachable by an ordinary edit rather
+    than an attack. The old side alone still handles a deletion correctly: a hunk that
+    removes lines has a non-empty old range and an empty new one.
+
+    Two shapes need care. A file the fix CREATED has no old side (`--- /dev/null`), so its
+    new-side range is used; nothing can cite review-time lines in a file that did not
+    exist. And a pure insertion (`old_len == 0`) writes BETWEEN two old lines rather than
+    over any, so it claims the two it sits between -- a check added after line 12 does
+    resolve a finding citing line 12.
+
+    Generate the diff with rename detection ENABLED, which is git's default. Do NOT pass
+    `--no-renames` here, even though tools/freeze_check.py requires exactly that: the two
+    gates fail in opposite directions. Under `--no-renames` a rename becomes delete plus
+    create, the delete side attributes the WHOLE old file as touched, and every finding on
+    a renamed file resolves without anything having been fixed.
     """
     touched: dict[str, set[int]] = {}
     old_path: str | None = None
@@ -55,8 +71,14 @@ def touched_lines(diff_text: str) -> dict[str, set[int]]:
                 continue
             old_start, old_len = int(match.group(1)), int(match.group(2) or 1)
             new_start, new_len = int(match.group(3)), int(match.group(4) or 1)
-            touched[path].update(range(old_start, old_start + old_len))
-            touched[path].update(range(new_start, new_start + new_len))
+            if old_path is None:
+                # Created by the fix: no review-time coordinates exist for this file.
+                touched[path].update(range(new_start, new_start + new_len))
+            elif old_len == 0:
+                # A pure insertion sits between two old lines; claim both.
+                touched[path].update((old_start, old_start + 1))
+            else:
+                touched[path].update(range(old_start, old_start + old_len))
     return touched
 
 
