@@ -16,8 +16,9 @@ the PRODUCTION reader, not by the file, and a correct parser has nothing to reje
 gap is the measured size of the problem this library solves, and it opens the README.
 
 Run it as `uv run python -m tools.duckdb_baseline` from the repository root -- the module
-path needs the root on sys.path. The fixtures it reads are resolved from this file rather
-than from the working directory, so only that first hop depends on where you stand.
+path needs the root on sys.path. The fixture directory is resolved by
+tools/make_incident_fixtures.py from ITS OWN location rather than from the working
+directory, so only that first hop depends on where you stand.
 """
 from __future__ import annotations
 
@@ -27,8 +28,8 @@ from pathlib import Path
 import duckdb
 
 # The fixture directory has ONE definition, in the generator that writes it, anchored on
-# that file rather than on the current directory. This script reads what that module
-# wrote, so importing the location states the same fact once instead of twice.
+# that module's own file rather than on the current directory. This script reads what that
+# module wrote, so importing the location states the same fact once instead of twice.
 from tools.make_incident_fixtures import INCIDENTS
 
 CASES: tuple[tuple[str, dict[str, str]], ...] = (

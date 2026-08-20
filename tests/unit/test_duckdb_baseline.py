@@ -56,11 +56,19 @@ def _parsed(name: str, columns: dict[str, str]) -> list[tuple[object, ...]]:
     # `probe` answers "how many rows and which rejects". The claim in the baseline's
     # docstring -- that DuckDB parses the two silent incidents CORRECTLY -- is about the
     # VALUES, and a count of 1 with 0 rejects does not say what the field contains.
+    #
+    # Every read_csv option `probe` passes is passed here too, `store_rejects=true`
+    # included, and only the projection differs: `*` where probe counts. That option is
+    # not decoration in a helper that never reads reject_errors -- it decides what a row
+    # that violates the declared schema DOES. Set, such a row is diverted into the rejects
+    # table and the rest come back; unset, the read raises. So it selects which rows are
+    # returned, and dropping it would make this a different read from the one the
+    # committed baseline counted -- silently, for exactly the fixtures where it matters.
     con = duckdb.connect()
     try:
         return con.execute(
             f"SELECT * FROM read_csv(?, header=true, "
-            f"columns={_columns_clause(columns)}, strict_mode=true)",
+            f"columns={_columns_clause(columns)}, store_rejects=true, strict_mode=true)",
             [str(INCIDENTS / name)],
         ).fetchall()
     finally:
