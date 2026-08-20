@@ -1,19 +1,25 @@
-"""The free baseline. This is what you get without this library, and it opens the README.
+"""The free baseline. This is what you get without this library.
 
 Measured claim (docs/measurements.md section 9): a twelve-line DuckDB script catches the
 three CSV incidents with a clean negative control. The number is a claim about DuckDB, not
-a target for this file -- if it takes more lines, the README says so.
+a target for this file -- if it takes more lines, the number to publish is this file's own.
 
 Measured limit (section 2, re-probed): `reject_errors` populates only for rows DuckDB
 REJECTS. The incident row `1,"say ""hi"", bye"` it parses correctly and emits no position
-for. That is why DuckDB is this project's oracle of VALUE and never of position.
+for. That is why DuckDB is this project's oracle of VALUE, and an oracle of position only
+for the rows it rejects.
 
 Measured RESULT, 2026-08-19, duckdb 1.5.5 (docs/duckdb-baseline-output.txt): the section 9
 claim is FALSE. This script catches ONE of the three -- `extra_field`, the only file that
 is malformed against its declared schema. `multiline` and `escape` it parses correctly and
-silently, which is section 2 arriving at its conclusion: the incidents are damage done by
-the PRODUCTION reader, not by the file, and a correct parser has nothing to reject. That
-gap is the measured size of the problem this library solves, and it opens the README.
+silently, which is section 2 arriving at its conclusion: a correct parser has nothing to
+reject in a well-formed file. That the damage is done instead by the PRODUCTION reader is
+a PREDICTION and is not measured here -- the differential task settles it, and
+tools/make_incident_fixtures.py marks each prediction where the bytes are defined. What is
+measured is the gap: one of three, with a negative control that stayed silent.
+
+Putting that gap at the top of the README is what this file is for. README.md does not
+carry it yet; a later task quotes docs/duckdb-baseline-output.txt there verbatim.
 
 Run it as `uv run python -m tools.duckdb_baseline` from the repository root -- the module
 path needs the root on sys.path. The fixture directory is resolved by
@@ -41,9 +47,14 @@ CASES: tuple[tuple[str, dict[str, str]], ...] = (
 
 
 def _columns_clause(columns: dict[str, str]) -> str:
-    # `columns` is a STRUCT literal in DuckDB's grammar, not a bindable parameter -- a
-    # Python dict passed as `?` does not become one. The names and types are ours, never
-    # user input, so building the clause as text is safe here.
+    # Built as TEXT, and not because DuckDB refuses a parameter: measured on duckdb 1.5.5,
+    # a Python dict bound as `?` for `columns` returns the same column names, the same
+    # declared types, the same rows and the same reject rows as this literal does. It is
+    # text so that `_read_csv_clause` stays a fragment carrying exactly ONE bound
+    # parameter, the path, which every call site binds the same way; binding the dict as
+    # well would tie each caller's parameter list to the fragment's internals. The names
+    # and types are this module's own literals in `CASES`, never user input, so building
+    # the clause as text is safe here.
     return "{" + ", ".join(f"'{name}': '{dtype}'" for name, dtype in columns.items()) + "}"
 
 
@@ -65,14 +76,16 @@ def _read_csv_clause(columns: dict[str, str]) -> str:
 def probe(path: Path, columns: dict[str, str]) -> tuple[int, list[tuple[object, ...]]]:
     con = duckdb.connect()
     try:
-        # Two measured details, both load-bearing on duckdb 1.5.5, and each one on its own
-        # is enough to make the next statement raise CatalogException instead of returning
-        # rows. The subquery: a bare `SELECT count(*) FROM read_csv(...)` is optimised into
-        # the scan, which then never materialises the rejects tables at all. And
-        # `fetchall`, not `fetchone`: the tables are registered when the result is drained,
-        # and a one-row aggregate read with `fetchone` leaves it open.
+        # `fetchall`, not `fetchone`, and it is the whole reason the next statement finds
+        # anything: the rejects tables are registered when the result is DRAINED, and a
+        # one-row aggregate read with `fetchone` leaves it open. Measured on duckdb 1.5.5,
+        # fresh connection per cell, clean.csv and extra_field.csv crossed with a bare
+        # `count(*)` and with a `SELECT count(*) FROM (SELECT * FROM ...)` wrapper: all
+        # four `fetchone` cells raised CatalogException and all four `fetchall` cells
+        # returned the rejects table, at identical counts and identical reject rows. The
+        # wrapper changes nothing on this install, so it is deliberately not used here.
         rows = con.execute(
-            f"SELECT count(*) FROM (SELECT * FROM {_read_csv_clause(columns)})",
+            f"SELECT count(*) FROM {_read_csv_clause(columns)}",
             [str(path)],
         ).fetchall()
         rejects = con.execute(
@@ -81,12 +94,11 @@ def probe(path: Path, columns: dict[str, str]) -> tuple[int, list[tuple[object, 
     finally:
         # In a `finally` because both statements above raise on ordinary inputs. Measured
         # on duckdb 1.5.5: a path matching no file raises IOException out of the first, and
-        # the second raises CatalogException whenever the first failed to materialise the
-        # rejects tables (the two traps above). NOT a row that violates the declared schema
-        # -- `store_rejects=true` diverts that one, which is why extra_field.csv returns
-        # both rows and a reject rather than raising. The rejects tables live inside the
-        # connection, so a leak here is a leaked catalog, and the error path is exactly the
-        # one a caller is most likely to retry in a loop.
+        # the second raises CatalogException whenever the first left its result undrained
+        # (the trap above). NOT a row that violates the declared schema: `store_rejects`
+        # diverts that one, which is why extra_field.csv returns both rows and a reject
+        # rather than raising. The rejects tables live inside the connection, so a leak
+        # here is a leaked catalog.
         con.close()
     return (int(rows[0][0]) if rows else 0, rejects)
 
