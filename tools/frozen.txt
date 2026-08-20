@@ -17,6 +17,7 @@ README.md
 .github/**
 .spec/**
 tests/acceptance/**
+tests/fixtures/**
 tests/conftest.py
 TASKS.md
 prompt.md
