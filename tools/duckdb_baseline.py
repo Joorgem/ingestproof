@@ -47,14 +47,11 @@ CASES: tuple[tuple[str, dict[str, str]], ...] = (
 
 
 def _columns_clause(columns: dict[str, str]) -> str:
-    # Built as TEXT, and not because DuckDB refuses a parameter: measured on duckdb 1.5.5,
-    # a Python dict bound as `?` for `columns` returns the same column names, the same
-    # declared types, the same rows and the same reject rows as this literal does. It is
-    # text so that `_read_csv_clause` stays a fragment carrying exactly ONE bound
-    # parameter, the path, which every call site binds the same way; binding the dict as
-    # well would tie each caller's parameter list to the fragment's internals. The names
-    # and types are this module's own literals in `CASES`, never user input, so building
-    # the clause as text is safe here.
+    # Built as TEXT by choice, not by necessity: measured on duckdb 1.5.5, DuckDB accepts
+    # the same mapping bound as `?` and returns the same columns, rows and rejects. Text
+    # keeps `_read_csv_clause` a fragment with a single bound parameter, the path. The
+    # names and types are ours, never user input, so building the clause as text is safe
+    # here.
     return "{" + ", ".join(f"'{name}': '{dtype}'" for name, dtype in columns.items()) + "}"
 
 
@@ -76,14 +73,12 @@ def _read_csv_clause(columns: dict[str, str]) -> str:
 def probe(path: Path, columns: dict[str, str]) -> tuple[int, list[tuple[object, ...]]]:
     con = duckdb.connect()
     try:
-        # `fetchall`, not `fetchone`, and it is the whole reason the next statement finds
-        # anything: the rejects tables are registered when the result is DRAINED, and a
-        # one-row aggregate read with `fetchone` leaves it open. Measured on duckdb 1.5.5,
-        # fresh connection per cell, clean.csv and extra_field.csv crossed with a bare
-        # `count(*)` and with a `SELECT count(*) FROM (SELECT * FROM ...)` wrapper: all
-        # four `fetchone` cells raised CatalogException and all four `fetchall` cells
-        # returned the rejects table, at identical counts and identical reject rows. The
-        # wrapper changes nothing on this install, so it is deliberately not used here.
+        # `fetchall`, not `fetchone`: the rejects tables are registered when the result is
+        # DRAINED, and a one-row aggregate read with `fetchone` leaves it open, so the next
+        # statement raises CatalogException instead of returning rows. Measured on duckdb
+        # 1.5.5, where wrapping this read in `SELECT count(*) FROM (SELECT * FROM ...)`
+        # changed neither the counts nor the rejects on these fixtures, so it is counted
+        # directly.
         rows = con.execute(
             f"SELECT count(*) FROM {_read_csv_clause(columns)}",
             [str(path)],
@@ -94,11 +89,10 @@ def probe(path: Path, columns: dict[str, str]) -> tuple[int, list[tuple[object, 
     finally:
         # In a `finally` because both statements above raise on ordinary inputs. Measured
         # on duckdb 1.5.5: a path matching no file raises IOException out of the first, and
-        # the second raises CatalogException whenever the first left its result undrained
-        # (the trap above). NOT a row that violates the declared schema: `store_rejects`
-        # diverts that one, which is why extra_field.csv returns both rows and a reject
-        # rather than raising. The rejects tables live inside the connection, so a leak
-        # here is a leaked catalog.
+        # the second raises CatalogException when the rejects tables were never registered.
+        # NOT a row that violates the declared schema: `store_rejects` diverts that one,
+        # which is why extra_field.csv returns both rows and a reject rather than raising.
+        # The rejects tables live inside the connection, so a leak here is a leaked catalog.
         con.close()
     return (int(rows[0][0]) if rows else 0, rejects)
 
