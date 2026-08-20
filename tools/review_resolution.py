@@ -46,11 +46,19 @@ def touched_lines(diff_text: str) -> dict[str, set[int]]:
     over any, so it claims the two it sits between -- a check added after line 12 does
     resolve a finding citing line 12.
 
-    Generate the diff with rename detection ENABLED, which is git's default. Do NOT pass
-    `--no-renames` here, even though tools/freeze_check.py requires exactly that: the two
-    gates fail in opposite directions. Under `--no-renames` a rename becomes delete plus
-    create, the delete side attributes the WHOLE old file as touched, and every finding on
-    a renamed file resolves without anything having been fixed.
+    Two requirements on whoever generates the diff, and they pull opposite ways from the
+    other gate in this repository, so read both before wiring a diff source.
+
+    Rename detection ENABLED, which is git's default. Do NOT pass `--no-renames` here, even
+    though tools/freeze_check.py requires exactly that: the two gates fail in opposite
+    directions. Under `--no-renames` a rename becomes delete plus create, the delete side
+    attributes the WHOLE old file as touched, and every finding on a renamed file resolves
+    without anything having been fixed. Measured.
+
+    Zero context, `-U0`. A hunk header spans its context lines, not only the changed ones,
+    so at git's default `-U3` a deletion of lines 8-10 reports an old range of 5..13 and a
+    finding three lines away from a real change resolves without being touched. `-U0`
+    reports exactly 8..10. Measured both ways.
     """
     touched: dict[str, set[int]] = {}
     old_path: str | None = None
