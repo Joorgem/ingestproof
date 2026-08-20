@@ -16,7 +16,7 @@ from __future__ import annotations
 import duckdb
 import pytest
 
-from tools.duckdb_baseline import CASES, _columns_clause, main, probe
+from tools.duckdb_baseline import CASES, _read_csv_clause, main, probe
 from tools.make_incident_fixtures import FIXTURES, INCIDENTS, ROOT
 
 # Both anchored on the repository root, never on the current directory: pytest does not
@@ -57,18 +57,17 @@ def _parsed(name: str, columns: dict[str, str]) -> list[tuple[object, ...]]:
     # docstring -- that DuckDB parses the two silent incidents CORRECTLY -- is about the
     # VALUES, and a count of 1 with 0 rejects does not say what the field contains.
     #
-    # Every read_csv option `probe` passes is passed here too, `store_rejects=true`
-    # included, and only the projection differs: `*` where probe counts. That option is
-    # not decoration in a helper that never reads reject_errors -- it decides what a row
-    # that violates the declared schema DOES. Set, such a row is diverted into the rejects
-    # table and the rest come back; unset, the read raises. So it selects which rows are
-    # returned, and dropping it would make this a different read from the one the
-    # committed baseline counted -- silently, for exactly the fixtures where it matters.
+    # The read is `probe`'s own, imported rather than restated, so only the projection
+    # differs: `*` where probe counts. A second copy of the option list is what makes this
+    # helper able to drift into measuring a different read than the committed baseline did
+    # -- and nothing would catch it, because both fixtures asserted below produce no
+    # rejects and parse identically with or without `store_rejects=true`. The option is
+    # load-bearing all the same: see `_read_csv_clause` for what it does to a file that
+    # violates its declared schema, and to which rows come back.
     con = duckdb.connect()
     try:
         return con.execute(
-            f"SELECT * FROM read_csv(?, header=true, "
-            f"columns={_columns_clause(columns)}, store_rejects=true, strict_mode=true)",
+            f"SELECT * FROM {_read_csv_clause(columns)}",
             [str(INCIDENTS / name)],
         ).fetchall()
     finally:
