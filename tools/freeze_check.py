@@ -33,7 +33,11 @@ def _matches(rel: str, glob: str) -> bool:
     # over-match, because fnmatch's * spans "/" -- inert today, and safe in direction
     # (it blocks more, never less), but do not add one without handling it.
     if glob.endswith("/**"):
-        return rel.startswith(glob[:-2])
+        # `rel == dir` as well as `rel` under it. Without the first clause a path that IS
+        # the directory -- a bare file of that name, or a submodule gitlink planted at the
+        # root of a glob whose directory does not exist yet -- matches nothing and lands in
+        # neither set. Found independently by two reviewers, two tasks apart.
+        return rel == glob[:-3] or rel.startswith(glob[:-2])
     return fnmatch(rel, glob)
 
 

@@ -156,3 +156,14 @@ def test_a_frozen_path_renamed_into_a_writable_one_is_still_offending(fake_repo:
         "rename detection hid the frozen source path; --no-renames is missing"
     )
     assert offending_paths(fake_repo, changed) == ["tests/acceptance/test_a.py"]
+
+
+def test_the_directory_of_a_frozen_glob_is_itself_frozen(fake_repo: Path) -> None:
+    """`tests/acceptance/**` must claim the path `tests/acceptance` itself, not only what
+    is under it. Git names that bare path in two real shapes: a submodule gitlink planted
+    at the root of a glob whose directory does not exist yet, and a plain file of exactly
+    that name. Without it such a path matches nothing and lands in NEITHER the writable
+    nor the frozen set. Found independently by two reviewers, two tasks apart; both known
+    instances are unreachable today and self-close as their directories fill, so this test
+    is the only thing keeping it closed."""
+    assert offending_paths(fake_repo, ["tests/acceptance"]) == ["tests/acceptance"]
