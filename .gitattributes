@@ -7,7 +7,9 @@
 # and no test in the inner ring could have discovered it.
 * text=auto eol=lf
 
-tests/fixtures/**/*.csv   -text
-tests/fixtures/**/*.jsonl -text
-tests/fixtures/**/*.txt   -text
-tests/fixtures/**/*.bin   -text
+# A CATCH-ALL, not an enumeration. The four extensions this project uses today are
+# .csv .jsonl .txt .bin, but naming them means any future fixture extension silently
+# falls back to the `* text=auto eol=lf` above -- measured: a .json fixture resolves
+# `text: auto` under the enumeration while a .csv resolves `text: unset`. A fixture
+# directory holds bytes by definition, so scope the rule to the directory.
+tests/fixtures/** -text
