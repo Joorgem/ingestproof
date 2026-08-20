@@ -79,6 +79,13 @@ def parse_file(path: Path) -> list[SpecItem]:
 
         match_needs = NEEDS.match(raw)
         if match_needs:
+            if pending["needs"]:
+                raise ValueError(
+                    f"{path.as_posix()}:{number}: {pending['id']} carries a second `Needs:` "
+                    f"line. OFT accumulates them and this parser keeps only the last, so the "
+                    f"discarded line would change the requirement set with no change to the "
+                    f"criterion's hash."
+                )
             pending["needs"] = [
                 n.strip() for n in match_needs.group("needs").split(",") if n.strip()
             ]

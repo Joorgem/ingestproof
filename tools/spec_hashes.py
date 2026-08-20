@@ -85,9 +85,17 @@ def main(argv: list[str] | None = None) -> int:
     args = argv if argv is not None else sys.argv[1:]
     mode = args[0] if args else "verify"
     root = Path(".")
+    current = _current(root)
+    if not current:
+        # "0 criterion hashes verified" as a SUCCESS line is backwards for this project:
+        # a .spec/ that is missing, empty, or unreadable would go green exactly as loudly
+        # as a verified one, and `update` would pin an empty set over the top of it.
+        print(f"no specification items found under {(root / '.spec').as_posix()}",
+              file=sys.stderr)
+        return 1
     if mode == "update":
         write(root)
-        print(f"wrote {HASHES} for {len(_current(root))} items")
+        print(f"wrote {HASHES} for {len(current)} items")
         return 0
     drifted = verify(root)
     if drifted:
@@ -95,7 +103,7 @@ def main(argv: list[str] | None = None) -> int:
         for item_id in drifted:
             print(f"  {item_id}", file=sys.stderr)
         return 1
-    print(f"{len(_current(root))} criterion hashes verified")
+    print(f"{len(current)} criterion hashes verified")
     return 0
 
 

@@ -38,6 +38,12 @@ jobs:
       - name: Trace
         continue-on-error: true
         run: uv run python -m tools.oft
+      # This one BLOCKS, and deliberately so. tools/spec_parse is narrower than OFT, so an
+      # item in any other OFT-legal form is visible to the JAR and invisible to the inner
+      # ring -- unhashed and never Needs-checked. The counts agreeing is the only thing
+      # watching that gap, and unlike coverage it is already true today.
+      - name: The JAR and the parser see the same items
+        run: uv run python -m tools.oft check-counts
       - uses: actions/upload-artifact@v6
         if: always()
         with: { name: oft-report, path: oft-report.txt }

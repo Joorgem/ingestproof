@@ -51,6 +51,15 @@ jobs:
       - name: No criterion text moved without its revision
         run: uv run python -m tools.spec_hashes verify
 
+      - name: The criterion hashes are current
+        # `verify` accepts a revision bump before the new text is pinned -- deliberate, and
+        # the brief has a test for it -- but that leaves hashes.json stale until someone
+        # runs `update`, and in that window further edits to the bumped criterion ride free.
+        # This closes the window without changing verify(): regenerate, and fail if it moved.
+        run: |
+          uv run python -m tools.spec_hashes update
+          git diff --exit-code .spec/hashes.json
+
       - name: Lint
         run: uv run ruff check .
 
