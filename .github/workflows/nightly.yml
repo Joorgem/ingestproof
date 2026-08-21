@@ -51,6 +51,10 @@ jobs:
   corpus:
     name: corpus pin
     runs-on: ubuntu-latest
+    # The socket timeout in fetch_corpus fails a stalled read in two minutes; this is the
+    # backstop for everything it cannot see. Without it the job default is 360 minutes, and
+    # the measured cold-cache run is 8m39s.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v10.0.1
