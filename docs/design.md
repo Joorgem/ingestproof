@@ -68,15 +68,15 @@ Esta seção é o artefato mais forte do repositório. Publicar os próprios bec
 
 **3.1 — "Ninguém valida origem × tabela" é falso.** Reconciliação source-to-target é categoria nomeada com ~12 implementações, incluindo **duas do Databricks Labs**: DQX `compare_datasets` e Lakebridge reconcile. A frase "ninguém faz isso" está **proibida** em todo artefato deste projeto.
 
-**3.2 — Round-trip byte a byte é insound.** RFC 4180 torna aspas opcionais → falso positivo em CSV válido, medido em 4 de 8 eixos. E a correção óbvia cria ponto cego: dano de **re-segmentação** round-trippa byte-idêntico.
+**3.2 — Round-trip byte a byte é insound.** RFC 4180 torna aspas opcionais → falso positivo em CSV válido. E a correção óbvia cria ponto cego: dano de **re-segmentação** round-trippa byte-idêntico. ~~medido em 4 de 8 eixos~~ — **essa contagem não tem derivação nas medições; ver §12.7. Não citável até ser re-derivada**, e por isso saiu do README, cuja regra é que todo número dele seja encontrável em `measurements.md`.
 
 **3.3 — Conservação escalar é cega onde importa.** Dos 459 danos reais do incidente do `escape`, **456 preservam contagem de campo, de linha, bytes totais E digest do payload**.
 
 **3.4 — O problema já tem métrica formal.** Pollock, VLDB 2023. DuckDB lidera com 9,961.
 
-**3.5 — Existe linha de base gratuita, e ela abre o README.** Um script de 12 linhas de DuckDB pega os três incidentes com controle limpo. *"Eu medi a alternativa gratuita e aqui está a diferença"* é sinal sênior; *"ninguém faz isso"* morre em trinta segundos.
+**3.5 — Existe linha de base gratuita, e ela abre o README.** ~~Um script de 12 linhas de DuckDB pega os três incidentes com controle limpo.~~ **FALSIFICADO em 19-20/08/2026 — ver §12.6 das medições.** Medido: o DuckDB 1.5.5 pega **1 dos 3**, e os outros dois ele parseia **corretamente** — são CSV válido, e o dano foi do leitor de produção, não do arquivo. Um parser correto não tem o que rejeitar e não tem contra o que comparar. A conclusão da seção fica **mais forte**, não mais fraca: a lacuna medida de 2 em 3 é exatamente a classe que exige dois parsers em vez de um. *"Eu medi a alternativa gratuita e aqui está a diferença"* é sinal sênior; *"ninguém faz isso"* morre em trinta segundos.
 
-**3.6 — E o leitor de referência não entrega posição de byte.** ✔ Re-probado: o `reject_errors` do DuckDB só popula para linhas **rejeitadas**; a linha do incidente ele parseia limpa e não emite posição. **DuckDB é oráculo de VALOR, não de posição.**
+**3.6 — E o leitor de referência não entrega posição de byte para o que importa.** ✔ Re-probado: o `reject_errors` do DuckDB só popula para linhas **rejeitadas**; a linha do incidente ele parseia limpa e não emite posição. Para o que ele *rejeita* há posição — a saída do baseline diz `line=4 col=3`. Então o limite não é ausência de posição: é que **não há posição para as linhas que ele aceitou**, que é onde o dano destes incidentes mora. **DuckDB é oráculo de VALOR, e de posição só sobre o que rejeita.**
 
 ---
 
@@ -89,6 +89,7 @@ Cada uma entra com o que **deixa passar**. Omitir qualquer uma é o defeito; inc
 | **Databricks Labs DQX** | regras de qualidade + `compare_datasets` em Databricks | compara dois DataFrames — ambos já parseados, defeito de parse cancela dos dois lados |
 | **Databricks Labs Lakebridge** | reconcilia origem relacional × Databricks | fonte relacional apenas; não aceita arquivo |
 | **Google DVT** | arquivo × tabela | lê com `pandas.read_csv(path)` puro, sem dialeto; row-hash não suportado para arquivo |
+| **datacompy** | comparação DataFrame × DataFrame com relatório de diferenças | os dois lados já vêm parseados, e ele não opina sobre como foram lidos |
 | **Frictionless** | checksum/bytes/linhas/campos do arquivo | prova que o arquivo é o esperado, não que o parse o preservou |
 | **Great Expectations / dbt-expectations / Deequ** | tabela, e cross-table | mesma anulação de defeito compartilhado |
 | **Soda** | recon entre duas relações | recon não está no pacote OSS |

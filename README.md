@@ -76,8 +76,8 @@ against the source bytes.
 Publishing the dead ends, with the measurement, is the point of this section.
 
 - **Byte-for-byte round-trip is unsound.** RFC 4180 makes quoting optional, so valid CSV
-  false-positives — measured on 4 of 8 axes. And the obvious correction creates a blind
-  spot: re-segmentation damage round-trips byte-identical.
+  false-positives. And the obvious correction creates a blind spot: re-segmentation damage
+  round-trips byte-identical.
 - **Scalar conservation is blind where it matters.** Of the 459 real damaged records from
   the `escape` incident, **456 preserve field count, row count, total bytes and payload
   digest**. Any conservation check walks straight past them.

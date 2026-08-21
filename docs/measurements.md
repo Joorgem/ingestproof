@@ -447,3 +447,11 @@ line B'), ('2', 'ok')` e `('1', 'say "hi", bye')` — que é a
    que a §9 é. Publicar "64 contra 12" sem dizer que 28 são docstring seria repetir o gênero
    uma camada abaixo. O que derruba o "12" é a ordem de grandeza — 36 linhas de código
    executável, três vezes o alegado —, não o dígito.
+
+7. **"Medido em 4 de 8 eixos"** (§3.2 do desenho) **não tem derivação neste documento.**
+   Achado em 20/08/2026 pelo implementador da Tarefa 12, ao rodar o próprio gate que o README
+   carrega: o README afirma que todo número dele está aqui, e este não estava. Escapou ao gate
+   por um motivo que vale registrar — a regex exige três caracteres, então `4` e `8` sozinhos
+   são **invisíveis** para ela. O gate cobre números longos, não números pequenos.
+   Saiu do README. Não é citável em lugar nenhum até que os oito eixos sejam nomeados e os
+   quatro que falsopositivam sejam re-medidos.
