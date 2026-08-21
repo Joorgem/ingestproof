@@ -48,3 +48,11 @@ def test_it_names_the_ledger_as_the_source_and_carries_the_tip_hash() -> None:
 
 def test_an_empty_ledger_renders_without_crashing() -> None:
     assert "Turns: **0**" in render([])
+
+
+def test_it_points_at_the_rollback_instructions_rather_than_carrying_them() -> None:
+    # The renderer emits a fixed template plus two counts tables; it carries no free text
+    # from any entry. So emergency instructions cannot live in the ledger, and cannot live
+    # in LOOP.md by hand either -- the next render erases them. A pointer in the template
+    # is the part that survives, and this is what keeps it there.
+    assert "docs/allowlist-rollback.md" in render([])
