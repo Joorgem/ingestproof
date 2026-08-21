@@ -3,7 +3,7 @@
 Marked `external`: it needs the network and a published artefact, so the inner ring
 deselects it. Run it by hand after a release:
 
-    uv run pytest tests/acceptance/test_ac10_published_package.py -m external -v
+    uv run pytest tests/acceptance/test_ac10_published_package.py -m external -vv
 """
 from __future__ import annotations
 
@@ -48,10 +48,13 @@ def test_both_a_wheel_and_an_sdist_are_published() -> None:
 def test_the_wheel_carries_a_provenance_attestation() -> None:
     # There is no API token in this project by design; OIDC is the whole credential, and
     # the attestation is the observable proof that the OIDC path is what published this.
-    # The URL comes from the PEP 740 simple API: /pypi/<name>/<version>/json reports
-    # provenance null for every project, attested or not (checked against sigstore's own).
+    # The URL comes from the PEP 740 simple API; /pypi/<name>/<version>/json has no
+    # provenance key at all.
     files = _fetch_json(PYPI_SIMPLE, "application/vnd.pypi.simple.v1+json")["files"]
     wheels = [f for f in files if f["filename"] == WHEEL]  # type: ignore[union-attr,index]
+
+    assert wheels, f"{WHEEL} not in {PYPI_SIMPLE}"
+
     provenance = wheels[0].get("provenance")
 
     assert provenance, "no provenance URL: attestations did not attach"
@@ -60,6 +63,7 @@ def test_the_wheel_carries_a_provenance_attestation() -> None:
 
     assert publisher["repository"] == "Joorgem/ingestproof"
     assert publisher["workflow"] == "release.yml"
+    assert publisher["environment"] is None  # PyPI records "(Any)" as null.
 
 
 def test_it_installs_into_a_clean_interpreter_and_ships_py_typed(tmp_path: Path) -> None:
@@ -68,18 +72,23 @@ def test_it_installs_into_a_clean_interpreter_and_ships_py_typed(tmp_path: Path)
     python = venv / ("Scripts" if sys.platform == "win32" else "bin") / (
         "python.exe" if sys.platform == "win32" else "python"
     )
-    subprocess.run(
+    install = subprocess.run(
         [str(python), "-m", "pip", "install", "--no-cache-dir", f"ingestproof=={VERSION}"],
-        check=True, capture_output=True,
+        capture_output=True, text=True,
     )
+
+    assert install.returncode == 0, install.stderr
 
     probe = subprocess.run(
         [str(python), "-c",
          "import ingestproof, pathlib, sys;"
          "print(ingestproof.__version__);"
          "print((pathlib.Path(ingestproof.__file__).parent / 'py.typed').exists())"],
-        check=True, capture_output=True, text=True,
+        capture_output=True, text=True,
     )
+
+    assert probe.returncode == 0, probe.stderr
+
     version, has_marker = probe.stdout.split()
 
     assert version == VERSION
