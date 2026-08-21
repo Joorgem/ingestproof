@@ -116,3 +116,29 @@ def stall_report(entries: Sequence[dict[str, object]], limit: int = STALL_LIMIT)
         "task as written cannot be closed by the criterion it names.",
     ]
     return "\n".join(lines) + "\n"
+
+# The hook that refuses writes to frozen paths lives in two places: this one, which CI
+# tests, and the installed copy, which is what actually refuses. Nothing keeps them in
+# step on its own -- CI cannot see ~/.claude.
+INSTALLED_HOOK = Path.home() / ".claude" / "hooks" / "ingestproof-allowlist.py"
+HOOK_SOURCE = Path("tools") / "hooks" / "ingestproof_allowlist.py"
+
+
+def assert_hook_installed(repo: Path) -> None:
+    """Refuse to start a turn when the installed copy is absent or has drifted.
+
+    This is the cheapest place to notice. It does not check that ~/.claude/settings.json
+    still arms the hook, and it cannot: a turn that could read its own gate's configuration
+    is a turn that could learn to edit it.
+    """
+    source = repo / HOOK_SOURCE
+    if not INSTALLED_HOOK.exists():
+        raise RuntimeError(
+            f"the allowlist hook is not installed at {INSTALLED_HOOK}; "
+            f"copy it from {source}"
+        )
+    if INSTALLED_HOOK.read_bytes() != source.read_bytes():
+        raise RuntimeError(
+            f"{INSTALLED_HOOK} has drifted from {source}. The installed copy is what "
+            f"refuses writes, and it is no longer the copy CI tested."
+        )

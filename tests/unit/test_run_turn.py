@@ -169,3 +169,50 @@ def test_an_empty_closed_criterion_does_not_count_as_a_close() -> None:
     entries = [_e(0, "req~ac-17~1"), {"seq": 1, "task": "T-1", "closed_criterion": ""}]
 
     assert turns_since_close(entries) == 1
+
+
+def _repo_with_hook_source(tmp_path: Path, body: bytes) -> Path:
+    repo = tmp_path / "repo"
+    (repo / "tools" / "hooks").mkdir(parents=True)
+    (repo / "tools" / "hooks" / "ingestproof_allowlist.py").write_bytes(body)
+    return repo
+
+
+def test_a_turn_refuses_to_start_when_the_installed_hook_has_drifted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from loop import run_turn
+
+    repo = _repo_with_hook_source(tmp_path, b"the tested copy")
+    installed = tmp_path / "installed.py"
+    installed.write_bytes(b"a DIFFERENT copy")
+    monkeypatch.setattr(run_turn, "INSTALLED_HOOK", installed)
+
+    with pytest.raises(RuntimeError, match="drifted"):
+        run_turn.assert_hook_installed(repo)
+
+
+def test_a_turn_refuses_to_start_when_the_hook_was_never_installed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The likelier of the two: a fresh machine, or a ~/.claude restored from a backup.
+    from loop import run_turn
+
+    repo = _repo_with_hook_source(tmp_path, b"the tested copy")
+    monkeypatch.setattr(run_turn, "INSTALLED_HOOK", tmp_path / "nowhere.py")
+
+    with pytest.raises(RuntimeError, match="not installed"):
+        run_turn.assert_hook_installed(repo)
+
+
+def test_a_turn_accepts_an_installed_hook_that_matches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from loop import run_turn
+
+    repo = _repo_with_hook_source(tmp_path, b"same bytes")
+    installed = tmp_path / "installed.py"
+    installed.write_bytes(b"same bytes")
+    monkeypatch.setattr(run_turn, "INSTALLED_HOOK", installed)
+
+    run_turn.assert_hook_installed(repo)  # must not raise
