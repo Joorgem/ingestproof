@@ -11,6 +11,7 @@ has 4 GB and the flagship already measured Spark dying at about 1.8 GB free.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import shutil
 import sys
@@ -136,11 +137,10 @@ def _install_atomically(
 ) -> Path:
     """Fill a `.part` sibling, verify THAT, and only then move it into place.
 
-    Never straight into `cached_path()`. A dropped connection, a cancelled runner or a failed
-    verify would otherwise leave a corrupt file sitting at the canonical name, and consumers
-    do not all go through `is_cached()` -- the inner-member check opens `cached_path()` bare,
-    and later tasks will copy that shape. The failure mode has to be "no file", never "the
-    wrong file at the right name".
+    Nothing reaches the canonical name until the bytes match the pin. Written straight into
+    `cached_path()`, a dropped connection, a cancelled runner or a failed verify would leave
+    a corrupt file sitting there, and consumers do not all go through `is_cached()` -- the
+    inner-member check opens `cached_path()` bare, and later tasks will copy that shape.
 
     A SIBLING, not the system temp directory: `Path.replace` is atomic only within a single
     filesystem, and the cache home is easily on a different volume from temp.
@@ -152,9 +152,10 @@ def _install_atomically(
         verify(part, pinned)
         part.replace(target)
     finally:
-        # Every exit, KeyboardInterrupt included. After a successful replace there is
-        # nothing left at this name, and missing_ok covers a fill that never got started.
-        part.unlink(missing_ok=True)
+        # Every exit, KeyboardInterrupt included. Suppressed because a cleanup that raised
+        # would become the exception the caller sees, in place of the real failure.
+        with contextlib.suppress(OSError):
+            part.unlink(missing_ok=True)
     return target
 
 
@@ -202,13 +203,11 @@ def main(argv: list[str] | None = None) -> int:
             # resident at once, in a module whose docstring cites a 4 GB machine.
             shutil.copyfile(source, part)
 
-        # `if not target.exists()` used to guard this, and that is a weaker property than
-        # the line below claims: a target holding some other month's bytes was left exactly
-        # where it was while the operator read that the cache had been seeded. is_cached()
-        # asks the same question the message answers.
+        # `if not target.exists()` used to guard this, and existing is weaker than matching
+        # the pin: a target holding some other month's bytes was left exactly where it was.
         if not is_cached():
             _install_atomically(target, PINNED, copy_in)
-        print(f"{source} matches the pin; cache seeded at {target}")
+        print(f"{source} matches the pin; cache at {target}")
         return 0
 
     path = download()

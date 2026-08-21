@@ -149,16 +149,15 @@ def test_verify_local_seeds_a_cache_that_is_empty(
 
     seeded = tmp_path / "corpus" / "2026-06" / PINNED.filename
     assert seeded.read_bytes() == payload
-    assert "cache seeded at" in capsys.readouterr().out
+    assert "cache at" in capsys.readouterr().out
 
 
-def test_verify_local_does_not_call_a_cache_of_other_bytes_seeded(
+def test_verify_local_replaces_a_cache_holding_other_bytes(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
-    # The message asserts "cache seeded at PATH". The old guard was `if not target.exists()`,
-    # so a target holding some other month's bytes was left exactly where it was while the
-    # operator was told the cache had been seeded. Whatever this command prints, the file it
-    # names has to be the file the pin names.
+    # The old guard was `if not target.exists()`, and existing is weaker than matching the
+    # pin: a target holding some other month's bytes was left exactly where it was. Whatever
+    # this command prints, the file it names has to be the file the pin names.
     payload = b"pretend corpus"
     source = tmp_path / "already-downloaded.zip"
     source.write_bytes(payload)
@@ -171,7 +170,7 @@ def test_verify_local_does_not_call_a_cache_of_other_bytes_seeded(
 
     assert main(["--verify-local", str(source)]) == 0
 
-    assert "cache seeded at" in capsys.readouterr().out
+    assert "cache at" in capsys.readouterr().out
     assert occupied.read_bytes() == payload
 
 
@@ -260,9 +259,9 @@ def test_a_download_whose_bytes_fail_the_pin_leaves_no_file_at_the_canonical_nam
     with pytest.raises(CorpusMismatch, match="sha256"):
         download()
 
-    # Never a wrong file at the right name: consumers do not all go through is_cached().
-    # The inner-member check in the plan opens cached_path() bare, and later tasks will
-    # copy that shape.
+    # Nothing reaches the canonical name until the bytes match: consumers do not all go
+    # through is_cached(). The inner-member check in the plan opens cached_path() bare,
+    # and later tasks will copy that shape.
     assert not cached_path().exists()
     assert list(cached_path().parent.glob("*.part")) == []
 
@@ -282,3 +281,25 @@ def test_a_connection_that_drops_mid_stream_leaves_no_file_at_the_canonical_name
 
     assert not cached_path().exists()
     assert list(cached_path().parent.glob("*.part")) == []
+
+
+def test_a_cleanup_that_fails_does_not_replace_the_real_error(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # The `.part` unlink runs in a `finally`. Unguarded, an unlink that raises -- a Windows
+    # lock, a read-only cache directory -- becomes the exception the caller sees, and the
+    # pin mismatch that actually stopped the night is gone.
+    payload = b"pretend corpus"
+    monkeypatch.setenv("INGESTPROOF_CORPUS_HOME", str(tmp_path / "corpus"))
+    monkeypatch.setattr(
+        "tools.fetch_corpus.PINNED", PINNED.replacing(size=len(payload), sha256="0" * 64)
+    )
+    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen(payload, []))
+
+    def refuse_to_unlink(self: Path, missing_ok: bool = False) -> None:
+        raise OSError("the cache directory is read-only")
+
+    monkeypatch.setattr(Path, "unlink", refuse_to_unlink)
+
+    with pytest.raises(CorpusMismatch, match="sha256"):
+        download()

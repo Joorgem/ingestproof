@@ -19,6 +19,8 @@ jobs:
   traceability:
     name: OpenFastTrace
     runs-on: ubuntu-latest
+    # Capped like its sibling below. The job default is 360 minutes; this one measures 14s.
+    timeout-minutes: 15
     steps:
       # The node20 runtime is deprecated, and THE MAJOR THAT FIXES IT DIFFERS PER ACTION --
       # checked one by one, not bumped by pattern: setup-java v5 is node24, but
