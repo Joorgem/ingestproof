@@ -1,11 +1,13 @@
 > Copied on 2026-08-20 from `docs/superpowers/specs/2026-08-18-ingestproof-design.md`.
 > The origin is the private planning repository; changes land there first. Section 0 of
 > this document is the record of what v1 got wrong, and it is kept deliberately.
+> Where it cites `docs/superpowers/research/ingestproof-measurements.md`, that file is
+> `docs/measurements.md` here.
 
 # Design — `ingestproof`: o contrato de ingestão, e a prova de que o parse não mentiu
 
 **Data:** 2026-08-18 · **v2**, reescrita depois de revisão adversarial
-**Status:** Aguardando revisão do Jorge
+**Status:** Aprovado pelo Jorge em 19/08/2026. A P0 executa contra ele desde então; correções feitas durante a execução estão marcadas no lugar, nunca reescritas em silêncio.
 **Vaga alvo:** 102697 — Sr. Data Engineer (`docs/102697-sr-data-engineer.md`)
 **Medições:** `docs/superpowers/research/ingestproof-measurements.md` — **nenhum número deste documento pode ser citado sem estar lá**
 **Fases:** P0–P6. O prefixo `P` existe para não colidir com as fases F0–F7 do flagship, que este documento também referencia.
@@ -24,7 +26,14 @@ A v1 propunha uma **biblioteca de fidelidade de ingestão** — um diferencial d
 
 **E um achado que expôs um erro de processo meu.** A decisão de 22/07 nomeia literalmente *"extrair o gerador chaos-aware (ou framework de contratos+quarentena) para PyPI"*. A v1 propunha uma terceira coisa e afirmava estar honrando aquela decisão. A troca nunca foi argumentada — passou despercebida por mim e pelo Jorge por seis commits.
 
-**A v2 é a fusão**, decidida pelo Jorge em 18/08: o framework de contratos+quarentena é o chassi, e o diferencial de fidelidade é o check mais distintivo dentro dele. Nada da pesquisa se perde — o diferencial deixa de ser *o produto* e vira *o check que ninguém mais tem*.
+**A v2 é a fusão**, decidida pelo Jorge em 18/08: o framework de contratos+quarentena é o chassi, e o diferencial de fidelidade é o check mais distintivo dentro dele. Nada da pesquisa se perde — o diferencial deixa de ser *o produto* e vira *o check mais distintivo do chassi*.
+
+> ~~"o check que ninguém mais tem"~~ — corrigido em 20/08/2026. Era a alegação que a §3.1 deste
+> mesmo documento **proíbe**, em paráfrase, quarenta linhas acima da proibição. Não disparava o
+> grep porque não usa as palavras banidas, e sobreviveu a um passe de correção que consertou
+> quatro outros pontos. A forma certa é a que a §4 já alcança: o que não está empacotado em
+> lugar nenhum é a *combinação* — uma declaração única que gera schema, regras, quarentena,
+> promoção e job **e** carrega um check de fidelidade contra os bytes de origem.
 
 ---
 
@@ -121,7 +130,7 @@ Origem: `src/opl/bronze/registry.py` (769 linhas), `rules.py` (481), `rule_predi
 Diferencial de valor entre dois parsers, contra um **dialeto de origem declarado**.
 
 - O dialeto é **entrada obrigatória, nunca inferida**. A biblioteca se recusa a rodar sem ele. Contrato numa frase: *"Você afirma o que o produtor escreveu. Nós provamos que o leitor leu aquilo."*
-- **DuckDB como oráculo de valor** (não de posição — §3.6). Versão pinada.
+- **DuckDB como oráculo de valor** (de posição só sobre o que ele rejeita — §3.6). Versão pinada.
 - Localização por **(índice de registro, índice de campo)**. Posição de byte é melhoria opcional da Camada 3, não requisito.
 - **Resincronização obrigatória:** medido, um registro com quebra de linha embutida faz o Spark emitir 1.001 linhas para 1.000 registros, e um `zip` posicional reporta ~500 divergências para 1 dano. Depois de divergir, reancorar em K registros byte-idênticos consecutivos e reportar **span de dano limitado**.
 - **Alvo de comparação: `promote ∪ quarantine` de um mesmo `_batch_id`, ou a staging antes do gate. Nunca a bronze pousada** — medido, 1% de falso positivo com zero dano real.

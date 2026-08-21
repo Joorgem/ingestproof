@@ -29,20 +29,20 @@ extra_field.csv: 2 rows accepted, 1 rejected
 clean.csv: 3 rows accepted, 0 rejected
 ```
 
-DuckDB catches one of the three: `extra_field.csv`, rejected as `TOO MANY COLUMNS` at
-line 4. The other two it parses correctly — `multiline.csv` keeps the newline inside the
-quoted field, and `escape.csv` returns `say "hi", bye` intact. That is the measured gap,
-and it is not a defect in DuckDB: those two files are valid CSV, and the damage in the real
-incident was done by the production reader, not by the file. A correct parser has nothing
-to reject there and nothing to compare against, which is why one parser cannot see this
-class of defect and a differential between two parsers can.
+DuckDB catches one of the three: in `extra_field.csv`, one row is rejected as
+`TOO MANY COLUMNS` at line 4. The other two it parses correctly — `multiline.csv` keeps
+the newline inside the quoted field, and `escape.csv` returns `say "hi", bye` intact.
+That is the measured gap, and it is not a defect in DuckDB: those two files are valid CSV,
+and the damage in the real incident was done by the production reader, not by the file.
+A correct parser has nothing to reject there and nothing to compare against, which is why
+one parser cannot see this class of defect and a differential between two parsers can.
 
-Two limits of that baseline, both re-probed rather than taken on report:
+Two limits of that baseline:
 
-- DuckDB's `reject_errors` populates **only for rows it rejects**. The row from the real
-  incident — `1,"say ""hi"", bye"` — it parses cleanly and emits no position for. It does
-  report a position for what it *does* reject: the output above says `line=4 col=3`. So the
-  limit is not that DuckDB lacks positions — it is that it has none for the rows it
+- DuckDB's `reject_errors` populates **only for rows it rejects**. The row that reproduces
+  the incident — `1,"say ""hi"", bye"` — it parses cleanly and emits no position for. It
+  does report a position for what it *does* reject: the output above says `line=4 col=3`.
+  So the limit is not that DuckDB lacks positions — it is that it has none for the rows it
   **accepted**, which is exactly where the damage in these incidents lives.
 - Its non-UTF-8 path is single-threaded: **~15 MB/s in cp1252** against ~121 MB/s in UTF-8.
   The corpus that matters here is cp1252.
@@ -73,7 +73,7 @@ against the source bytes.
 
 ## What the research killed
 
-Publishing the dead ends, with the measurement, is the point of this section.
+Publishing the dead ends is the point of this section.
 
 - **Byte-for-byte round-trip is unsound.** RFC 4180 makes quoting optional, so valid CSV
   false-positives. And the obvious correction creates a blind spot: re-segmentation damage
