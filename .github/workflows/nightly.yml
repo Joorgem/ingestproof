@@ -47,3 +47,26 @@ jobs:
       - uses: actions/upload-artifact@v6
         if: always()
         with: { name: oft-report, path: oft-report.txt }
+
+  corpus:
+    name: corpus pin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v10.0.1
+        with: { python-version: "3.12" }
+      - run: uv sync --all-groups
+      - name: Cache the pinned corpus between nights
+        # v5, not v4, and the rule above is what picks it: fetched action.yml at each tag
+        # and v4 is `using: node20` -- the deprecated one. v5 is node24, v6 is node24 as
+        # well but is not the FIRST major that clears it, so it would carry unrelated
+        # behaviour change into a file whose pins are chosen one by one.
+        uses: actions/cache@v5
+        with:
+          path: ~/.ingestproof-corpus
+          # The key is the pin itself: change the month or the hash and the cache misses,
+          # which is the only correct behaviour when the corpus identity changes.
+          key: corpus-2026-06-76dbe5d9
+      # 366 MB over a shared link. Nightly, cached, and never in the inner ring.
+      - name: Fetch and verify
+        run: uv run python -m tools.fetch_corpus
