@@ -1,0 +1,50 @@
+# .github/workflows/release.yml
+#
+# THE FILENAME IS PART OF THE CREDENTIAL. The PyPI pending publisher for `ingestproof` was
+# configured with workflow `release.yml`. Renaming this file makes OIDC fail with a message
+# that never mentions the filename.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v10.0.1
+        with: { python-version: "3.12" }
+      - run: uv build
+      - name: The wheel must carry py.typed
+        # AC-10 asks for it explicitly, and a missing package-data marker is invisible
+        # until a consumer's mypy silently stops seeing types.
+        run: |
+          uv run python -m zipfile -l dist/*.whl | grep -q 'ingestproof/py.typed'
+      # v6 is the first upload-artifact major off the deprecated node20 runtime.
+      - uses: actions/upload-artifact@v6
+        with: { name: dist, path: dist/ }
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    # NO `environment:` KEY. The pending publisher was configured with environment "(Any)",
+    # and adding one here without adding the same one on PyPI's side rejects the token.
+    # AC-20 (P6) moves both to `pypi` in the same change, and only after this path has been
+    # exercised once -- stacking protection on an unproven step gives one error two causes.
+    permissions:
+      id-token: write        # OIDC. This IS the credential; there is no API token anywhere.
+      attestations: write
+      contents: read
+    steps:
+      # v7 is the first download-artifact major off node20 -- the number differs per action.
+      - uses: actions/download-artifact@v7
+        with: { name: dist, path: dist/ }
+      - uses: pypa/gh-action-pypi-publish@v1.14.2
+        with:
+          attestations: true
