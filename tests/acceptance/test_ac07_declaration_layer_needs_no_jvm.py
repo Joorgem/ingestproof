@@ -90,9 +90,14 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _run(body: str) -> subprocess.CompletedProcess[str]:
-    # cwd is the repository root because `pythonpath = ["."]` in pyproject is what puts
-    # `src` on the path for this project, and a subprocess started anywhere else imports a
-    # different `ingestproof` or none at all.
+    # cwd is the repository root, and for `python -c` that does put the root on the
+    # child's import path -- sys.path[0] is "". It is NOT what makes `import ingestproof`
+    # work, and a reader who relies on the wrong reason will move this helper and be
+    # surprised twice. Measured: the same subprocess run with `cwd='C:/'` still imports
+    # <repo>/src/ingestproof/__init__.py and exits 0. What puts `src` on the path is the
+    # editable install's `.pth` in the venv. And `pythonpath = ["."]` in pyproject is a
+    # PYTEST ini option: it adds the repository ROOT rather than `src`, to pytest's own
+    # sys.path, and it does not reach a subprocess at all.
     return subprocess.run(
         [sys.executable, "-c", REFUSE_SPARK + body],
         capture_output=True,
