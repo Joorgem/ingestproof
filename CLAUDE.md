@@ -15,7 +15,7 @@ uv run mypy
 | ring | command | when |
 |---|---|---|
 | inner | `uv run pytest` | every turn. Seconds. No JVM, no Spark, no network. |
-| nightly | `.github/workflows/nightly.yml` | Linux only. Traceability, the real corpus, large fixtures. |
+| nightly | `.github/workflows/nightly.yml` | Linux only. Two jobs: traceability, and the real corpus. |
 | external | by hand | the PyPI release, and the one workspace run. |
 
 Markers deselect the outer rings by default (`-m 'not external and not nightly'`), so
@@ -47,7 +47,7 @@ uv run python -m tools.spec_hashes verify    # no criterion text moved silently
 uv run python -m tools.spec_hashes update    # ...and hashes.json is not merely stale:
 git diff --exit-code .spec/hashes.json       #    CI regenerates and fails on any diff
 uv run python -m tools.oft                   # traceability -- needs the JVM, nightly
-uv run python -m tools.oft check-counts      # the JAR and the parser see the same items
+uv run python -m tools.oft check-counts      # its own trace of .spec alone; see below
 ```
 
 `ci.yml` runs everything above except the two `tools.oft` lines, on every push to `main`
@@ -60,10 +60,14 @@ where they can:
 - Both `tools.oft` lines are nightly, because they need the JVM. `check-counts` **blocks**:
   `tools/spec_parse.py` is deliberately narrower than OFT, so an item in any other
   OFT-legal form is visible to the JAR and invisible to the inner ring — unhashed and never
-  Needs-checked — and the counts agreeing is the only thing watching that gap. `tools.oft`
-  itself carries `continue-on-error` for P0, where `src/` is one `__version__` line and
-  every criterion is legitimately uncovered; it loses that in the turn that lands the first
-  `[impl->...]` tag.
+  Needs-checked — and the counts agreeing is the only thing watching that gap. It runs its
+  **own** trace, over `.spec` alone, into `oft-spec-count.txt`, and does not read the report
+  the line above writes. OFT counts every imported coverage tag as a specobject, so `N
+  total` over the full tree reads 22 with no coverage, 23 with one tag and 24 with two —
+  against 22 criteria. Comparing that number would have gone red on P1's first tag and
+  stayed red. `tools.oft` itself carries `continue-on-error` for P0, where `src/` is one
+  `__version__` line and every criterion is legitimately uncovered; it loses that in the
+  turn that lands the first `[impl->...]` tag.
 
 ## Fixtures are bytes
 
@@ -71,6 +75,27 @@ where they can:
 `tools/make_incident_fixtures.py`, which writes bytes. Never create one with an editor:
 git rewrote the newline *inside* a quoted field in a measurement, which silently edits the
 RFC 4180 §2.6 regression case this library exists to catch.
+
+## Who runs a turn
+
+**Nothing in `loop/**` does.** There is no driver and no `main()` in `loop/run_turn.py`, on
+purpose: a runner written before anyone had run a turn would be unexercised code frozen the
+day it was written. The session running the turn IS the harness, and `prompt.md` carries the
+contract — which call it makes, when, and in the form that works from the repository root.
+These are the libraries it calls:
+
+| mechanism | what it decides |
+|---|---|
+| `loop.run_turn.assert_hook_installed` | refuse to start when the allowlist hook is absent or has drifted |
+| `loop.run_turn.clean_slate` | `reset --hard` **and** `clean -fdx -e .venv`, in that order |
+| `loop.run_turn.classify` | the outcome, from what happened rather than from what is claimed |
+| `loop.ledger.append` | one row per turn, appended programmatically |
+| `loop.render_loop_md` | `LOOP.md`, a view of that ledger and never a source |
+| `loop.run_turn.stall_report` | five loop turns closing nothing stops the loop |
+| `tools.review_resolution.partition` | which review findings the turn's diff actually resolved |
+
+`loop.ledger.append` is the one that must never go through an editor, and that is
+mechanical rather than stylistic — see below.
 
 ## The ledger
 

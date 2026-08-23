@@ -59,6 +59,7 @@ re-test if you need it not to have.
 | Command | `py -3.12 "C:/Users/jorge/.claude/hooks/ingestproof-allowlist.py"` |
 
 `loop.run_turn.assert_hook_installed` compares the installed copy against the in-repo one
-and raises when they differ. Nothing calls it yet: it is a check P1's harness can make, not
-something the installed system does on its own. The in-repo copy is what CI tests; the
-installed copy is what actually refuses.
+and raises when they differ. `prompt.md` makes it the first call of every turn, with the
+invocation form. Nothing in the installed system calls it on its own, and nothing can: it is
+a check the session running the turn makes, before it starts. The in-repo copy is what CI
+tests; the installed copy is what actually refuses.
