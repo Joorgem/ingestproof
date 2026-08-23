@@ -16,6 +16,17 @@
 >   cited in §5, are the FLAGSHIP's. They live in `open-payments-lakehouse`, not here.
 > - `docs/adoption-dry-run.md` in §11 is not a citation: it is the filename a later phase is
 >   asked to produce.
+>
+> **One sentence in §12.6 reads two ways, and for the same reason the correction goes here
+> and not into it.** The last line of its draining paragraph — "Com `store_rejects=false`,
+> o `fetchall` também levanta `CatalogException`" — reads literally as the COUNT's
+> `fetchall` raising, which is the opposite of what was measured. In context it is the
+> rejects read that is meant. Re-measured 2026-08-23 on duckdb 1.5.5 against
+> `tests/fixtures/incidents/clean.csv`: with `store_rejects=false` the count's `fetchall`
+> returns its three rows, and the `SELECT ... FROM reject_errors` after it raises
+> `CatalogException`, because those tables are never registered. `tools/duckdb_baseline.py`
+> cites this section and states the measured direction; without this line it would be
+> silently disagreeing with the sentence it points at.
 
 # Medições — o que foi realmente executado, e o que cada número significa
 
