@@ -75,3 +75,9 @@ def test_the_tip_is_the_last_row_even_when_that_row_is_a_correction() -> None:
 
     assert "b" * 64 in out
     assert "a" * 64 not in out
+
+
+def test_it_says_the_counts_exclude_corrections() -> None:
+    # Same precedent as the rollback pointer: the paragraph is template text, and deleting
+    # it left the suite green. A count whose rule is unstated is a count nobody can check.
+    assert "in the chain but not in these counts" in render([])

@@ -53,6 +53,23 @@ def is_turn(entry: dict[str, Any]) -> bool:
     return entry.get(CORRECTS) is None
 
 
+HUMAN = "human"
+
+
+def is_loop_turn(entry: dict[str, Any]) -> bool:
+    """A turn the LOOP ran.
+
+    The stall detector exists to catch the loop spinning without closing anything, so rows
+    from a phase the loop did not run must be inert to it by construction -- P0 is fourteen
+    such rows, and no instruction to a future harness would reliably survive.
+
+    The test is "not human" rather than a list of loop author values on purpose. An author
+    this code did not predict then counts as a loop turn, so the detector fires when it
+    should not rather than going quiet when it should fire.
+    """
+    return is_turn(entry) and entry.get("author") != HUMAN
+
+
 class LedgerTampered(RuntimeError):
     """The chain does not verify: an entry was edited, reordered or removed."""
 

@@ -10,7 +10,7 @@ import subprocess
 from collections.abc import Sequence
 from pathlib import Path
 
-from loop.ledger import Outcome, is_turn
+from loop.ledger import Outcome, is_loop_turn
 
 RESET = ("git", "reset", "--hard")
 CLEAN = ("git", "clean", "-fdx", "-e", ".venv")
@@ -69,14 +69,19 @@ def classify(
     return "RED"
 
 
-# How many consecutive turns may close nothing before the loop stops itself. Small on
+# How many consecutive LOOP turns may close nothing before the loop stops itself. Small on
 # purpose: the dominant defect in this work is a defect of PLAN, and five turns of a loop
 # grinding at a badly-specified task is exactly what that looks like from the outside.
 STALL_LIMIT = 5
 
 
 def turns_since_close(entries: Sequence[dict[str, object]]) -> int:
-    """Trailing turns that closed no criterion.
+    """Trailing LOOP turns that closed no criterion.
+
+    Human rows are not counted, and that is load-bearing rather than tidy: P0 is fourteen
+    human rows and none of them carries `closed_criterion`, so counting every row would
+    report a stall of fourteen against a limit of five on a ledger nobody looped over --
+    stopping the loop before its first turn.
 
     `closed_criterion` is written by the harness from two signals the agent does not
     control (spec section 7.6): the traceability report, and the frozen acceptance test
@@ -85,8 +90,8 @@ def turns_since_close(entries: Sequence[dict[str, object]]) -> int:
     """
     count = 0
     for entry in reversed(list(entries)):
-        if not is_turn(entry):
-            continue  # correcting a figure is not a turn, and must not count as a stall
+        if not is_loop_turn(entry):
+            continue  # a human row, or a row correcting one, is not the loop spinning
         if entry.get("closed_criterion"):
             return count
         count += 1
@@ -101,9 +106,9 @@ def stall_report(entries: Sequence[dict[str, object]], limit: int = STALL_LIMIT)
     # Slice by `stalled`, not by `limit`: the headline counts the stalled turns, so listing
     # a different number of them makes the report disagree with itself at exactly the
     # moment a human is reading it to work out why the loop stopped.
-    recent = [entry for entry in entries if is_turn(entry)][-stalled:]
+    recent = [entry for entry in entries if is_loop_turn(entry)][-stalled:]
     lines = [
-        f"STOPPED: {stalled} consecutive turns closed no criterion (limit {limit}).",
+        f"STOPPED: {stalled} consecutive loop turns closed no criterion (limit {limit}).",
         "",
         f"All {stalled}, and what each attempted:",
         "",

@@ -85,10 +85,12 @@ def decide(payload: dict[str, object], repo: Path | None = None) -> str | None:
         return f"{rel}: test files live under tests/, nowhere else."
     if rel in WRITABLE_FILES or rel.startswith(WRITABLE_PREFIXES):
         return None
+    # Not "is frozen": this branch is default-deny, and it also catches paths that are in
+    # no frozen glob -- tests/integration/** among them, which CI never looks at.
     return (
-        f"{rel} is frozen. A turn may write only src/**, tests/unit/**, "
+        f"{rel} is not writable by a turn. A turn may write only src/**, tests/unit/**, "
         f"tests/property/**, docs/** and LOOP.md. If this file is genuinely wrong, say so "
-        f"in LOOP.md and stop -- changing it is a human's push to main."
+        f"in LOOP.md and stop."
     )
 
 

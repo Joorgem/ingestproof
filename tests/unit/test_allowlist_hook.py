@@ -148,7 +148,7 @@ def test_main_returns_two_for_a_refused_write() -> None:
 
 def test_main_never_blocks_on_malformed_input() -> None:
     # A hook that crashes on unexpected input blocks every tool call in every project on
-    # this machine. Fail open, and let CI be the gate that fails closed.
+    # this machine. Allowing one write it should have refused is the cheaper mistake.
     assert main("not json at all") == 0
     assert main("") == 0
     assert main("[]") == 0
@@ -202,3 +202,13 @@ def test_no_frozen_path_is_writable_by_the_hook() -> None:
                is None]
 
     assert allowed == []
+
+
+def test_the_refusal_does_not_call_an_unfrozen_path_frozen() -> None:
+    # tests/integration/** is refused here and is in no frozen glob, so CI never sees it.
+    # Saying "is frozen" to that path has now been wrong in four places; this is the guard.
+    reason = decide(payload("Write", "tests/integration/test_x.py"), REPO)
+
+    assert reason is not None
+    assert "frozen" not in reason
+    assert "not writable by a turn" in reason

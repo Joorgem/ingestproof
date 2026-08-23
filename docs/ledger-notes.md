@@ -22,11 +22,11 @@ It predates task 14 and it is seven to twelve lines. It is recorded here because
 one of the rows is not derivable from the repository, which is worth knowing before the
 column is published rather than after.
 
-## P0-T14 — recorded 374, which is the first commit of three
+## P0-T14 — recorded 374, which is the first of the task's commits
 
-The row was written from `e991de0..13c2660`, the pre-gate commit alone, while the task also
-produced the two commits that followed it. An appended correcting entry carries the real
-figure and names the commit it was cut at.
+The row was written from `e991de0..13c2660`, the pre-gate commit alone, while the task went
+on to produce more. An appended correcting entry carries the real figure and names the
+commit it was cut at.
 
 That cutoff is not a rounding choice. A row recording the size of the task that writes it
 cannot include the commit that renders the row, so some cutoff is unavoidable; naming it is

@@ -128,6 +128,9 @@ def test_the_runner_uses_the_literals_the_frozen_acceptance_test_pins() -> None:
 def _e(seq: int, closed: str | None = None) -> dict[str, object]:
     entry: dict[str, object] = {
         "seq": seq, "task": f"T-{seq}", "criterion": "req~ac-01~1", "outcome": "GREEN",
+        # Explicit: every stall test below is about turns the LOOP ran. Human rows are
+        # inert to the detector, so omitting this would have made them pass by accident.
+        "author": "loop",
     }
     if closed:
         entry["closed_criterion"] = closed
@@ -219,7 +222,8 @@ def test_a_turn_accepts_an_installed_hook_that_matches(
 
 
 def _correction(seq: int) -> dict[str, object]:
-    return {"seq": seq, "task": "T-x", "outcome": "GREEN", "corrects_seq": 0}
+    return {"seq": seq, "task": "T-x", "outcome": "GREEN", "author": "human",
+            "corrects_seq": 0}
 
 
 def test_a_correcting_row_does_not_count_as_a_stalled_turn() -> None:
@@ -239,6 +243,43 @@ def test_the_stall_report_lists_the_turns_it_counted() -> None:
     report = stall_report(entries)
 
     assert report is not None
-    assert f"STOPPED: {STALL_LIMIT} consecutive turns" in report
+    assert f"STOPPED: {STALL_LIMIT} consecutive loop turns" in report
     assert "T-x" not in report
     assert f"T-{STALL_LIMIT - 1}" in report
+
+
+def _human(seq: int) -> dict[str, object]:
+    return {"seq": seq, "task": f"P0-T{seq}", "criterion": "allowlist", "outcome": "GREEN",
+            "author": "human"}
+
+
+def test_a_ledger_of_human_rows_never_reports_a_stall() -> None:
+    # The real case, not a hypothetical: P0 is fourteen human rows, none carrying
+    # closed_criterion. Counting every row reported a stall of fourteen against a limit of
+    # five, so a harness calling this on read_all() would stop the loop before its first turn.
+    entries = [_human(i) for i in range(14)]
+
+    assert turns_since_close(entries) == 0
+    assert stall_report(entries) is None
+
+
+def test_the_detector_still_fires_for_loop_rows() -> None:
+    # The other half. Making human rows inert must not make the detector inert.
+    entries = [_human(i) for i in range(14)] + [_e(100 + i) for i in range(STALL_LIMIT)]
+
+    report = stall_report(entries)
+
+    assert turns_since_close(entries) == STALL_LIMIT
+    assert report is not None
+    assert f"STOPPED: {STALL_LIMIT} consecutive loop turns" in report
+    assert "P0-T" not in report
+
+
+def test_an_author_this_code_did_not_predict_counts_as_a_loop_turn() -> None:
+    # Not a whitelist of loop author values: an unrecognised author must make the detector
+    # fire when it should not, never go quiet when it should fire.
+    entries = [{"seq": i, "task": f"T-{i}", "outcome": "GREEN", "author": "loop-v2"}
+               for i in range(STALL_LIMIT)]
+
+    assert turns_since_close(entries) == STALL_LIMIT
+    assert stall_report(entries) is not None
