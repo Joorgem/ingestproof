@@ -18,8 +18,9 @@ a PREDICTION and is not measured here -- the differential task settles it, and
 tools/make_incident_fixtures.py marks each prediction where the bytes are defined. What is
 measured is the gap: one of three, with a negative control that stayed silent.
 
-Putting that gap at the top of the README is what this file is for. README.md does not
-carry it yet; a later task quotes docs/duckdb-baseline-output.txt there verbatim.
+Putting that gap at the top of the README is what this file is for, and the README carries
+it: docs/duckdb-baseline-output.txt is quoted there verbatim, under "Start with what you
+already have for free".
 
 Run it as `uv run python -m tools.duckdb_baseline` from the repository root -- the module
 path needs the root on sys.path. The fixture directory is resolved by
@@ -79,6 +80,13 @@ def probe(path: Path, columns: dict[str, str]) -> tuple[int, list[tuple[object, 
         # 1.5.5, where wrapping this read in `SELECT count(*) FROM (SELECT * FROM ...)`
         # changed neither the counts nor the rejects on these fixtures, so it is counted
         # directly.
+        #
+        # Draining is NECESSARY AND NOT SUFFICIENT, and whoever copies this read pattern
+        # needs the second half. Re-measured on duckdb 1.5.5 against clean.csv: with
+        # `store_rejects=false` the count above still returns its rows and the
+        # `reject_errors` read below still raises CatalogException, because those tables
+        # are never registered at all. Draining fixes one cause, not both.
+        # docs/measurements.md section 12.6.
         rows = con.execute(
             f"SELECT count(*) FROM {_read_csv_clause(columns)}",
             [str(path)],

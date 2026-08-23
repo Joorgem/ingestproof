@@ -8,6 +8,14 @@
 > the exception, and the reason the rule works: it is not a fragile provenance, it is the
 > re-derivation that **falsified** §9's DuckDB claim. Its numbers are citable, and the
 > verbatim run behind them is `docs/duckdb-baseline-output.txt` in this repository.
+>
+> **The other `docs/...` paths below are not this repository's. This header is where they
+> are mapped, because the body is a verbatim copy and is not edited to repoint a citation.**
+>
+> - `docs/f2-wave-1-workspace-run-evidence.md` and `docs/f3-workspace-run-evidence.md`, both
+>   cited in §5, are the FLAGSHIP's. They live in `open-payments-lakehouse`, not here.
+> - `docs/adoption-dry-run.md` in §11 is not a citation: it is the filename a later phase is
+>   asked to produce.
 
 # Medições — o que foi realmente executado, e o que cada número significa
 

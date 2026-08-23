@@ -1,8 +1,15 @@
 > Copied on 2026-08-21 from `docs/superpowers/specs/2026-08-18-ingestproof-design.md`.
 > The origin is the private planning repository; changes land there first. Section 0 of
 > this document is the record of what v1 got wrong, and it is kept deliberately.
-> Where it cites `docs/superpowers/research/ingestproof-measurements.md`, that file is
-> `docs/measurements.md` here.
+>
+> **Every `docs/...` path below is the ORIGIN's. This header is where they are mapped,
+> because the body is a verbatim copy and is not edited to repoint a citation.**
+>
+> - `docs/superpowers/research/ingestproof-measurements.md` is `docs/measurements.md` here.
+> - `docs/102697-sr-data-engineer.md`, the job posting on the **Vaga alvo** line below, was
+>   not copied across. It exists only in the private planning repository.
+> - `docs/adoption-dry-run.md` is not a citation at all: it is the filename a later phase is
+>   asked to produce.
 
 # Design — `ingestproof`: o contrato de ingestão, e a prova de que o parse não mentiu
 

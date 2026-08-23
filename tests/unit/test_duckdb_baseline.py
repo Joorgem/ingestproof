@@ -8,8 +8,8 @@ The second is what DuckDB PARSED out of the two incidents it accepts in silence.
 baseline's docstring says it parses them correctly; a count of accepted rows cannot say
 that, so the values are asserted here and the claim has an artefact behind it.
 
-The third is docs/duckdb-baseline-output.txt, which a later task quotes verbatim in the
-README. It is not frozen, so this is the only thing that goes red when it drifts.
+The third is docs/duckdb-baseline-output.txt, which the README quotes verbatim. It is not
+frozen, so this is the only thing that goes red when it drifts.
 """
 from __future__ import annotations
 
