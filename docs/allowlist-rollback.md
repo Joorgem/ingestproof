@@ -1,9 +1,10 @@
 # Turning the allowlist hook off
 
-The `PreToolUse` allowlist refuses a turn's writes outside the set it may write: `src/**`,
-`tests/unit/**`, `tests/property/**`, `docs/**` and `LOOP.md`. That is wider than the frozen
-set. It is installed **machine-wide**, in `~/.claude/settings.json`, because a hook the agent
-could edit would be advice rather than a block (design section 7.3).
+The `PreToolUse` allowlist refuses writes **inside this repository** that fall outside the
+set a turn may write: `src/**`, `tests/unit/**`, `tests/property/**`, `docs/**` and
+`LOOP.md`. That set is wider than the frozen set, and anything outside this repository passes
+untouched. It is installed **machine-wide**, in `~/.claude/settings.json`, because a hook the
+agent could edit would be advice rather than a block (design section 7.3).
 
 Machine-wide is its risk. If tool calls start failing in *any* project for a reason that
 names ingestproof, use one of the two switches below.

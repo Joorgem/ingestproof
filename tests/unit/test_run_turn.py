@@ -254,10 +254,11 @@ def _human(seq: int) -> dict[str, object]:
 
 
 def test_a_ledger_of_human_rows_never_reports_a_stall() -> None:
-    # The real case, not a hypothetical: P0 is fourteen human rows, none carrying
-    # closed_criterion. Counting every row reported a stall of fourteen against a limit of
-    # five, so a harness calling this on read_all() would stop the loop before its first turn.
-    entries = [_human(i) for i in range(14)]
+    # The real shape, not a hypothetical: human turns plus the human row correcting one of
+    # them, and nothing carrying closed_criterion. Counting human turns too reported a stall
+    # on a ledger nobody looped over, so a harness calling this on read_all() would have
+    # stopped the loop before its first turn.
+    entries = [*(_human(i) for i in range(14)), _correction(14)]
 
     assert turns_since_close(entries) == 0
     assert stall_report(entries) is None

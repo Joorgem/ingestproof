@@ -1,10 +1,12 @@
-"""The hook's whole job is to say no to five specific things and yes to everything else.
-Both halves are tested, because a hook that says no to too much is how a lane deadlocks and
-a hook that says no to too little is how the gate becomes advice.
+"""The hook is default-deny inside this repository: it says yes to the set a turn may write
+and no to the rest, which is not a list. Both halves are tested, because a hook that says no
+to too much is how a lane deadlocks and a hook that says no to too little is how the gate
+becomes advice.
 
 The asymmetry is not symmetric, though: this file is installed globally, so a refusal that
-is too wide stops work in every other repository on this machine, while a refusal that is
-too narrow only costs the six minutes until CI says the same thing.
+is too wide stops work in every other repository on this machine. Too narrow is the cheaper
+mistake, but it is not a free one -- CI re-checks the frozen paths, and most of what this
+hook refuses is in none of them. The measurement is at the bottom of this file.
 """
 from __future__ import annotations
 
@@ -209,7 +211,7 @@ def test_no_frozen_path_is_writable_by_the_hook() -> None:
 
 def test_the_refusal_does_not_call_an_unfrozen_path_frozen() -> None:
     # tests/integration/** is refused here and is in no frozen glob, so CI never sees it.
-    # Saying "is frozen" to that path has now been wrong in four places; this is the guard.
+    # Prose kept calling this path frozen; this is the guard that makes that fail instead.
     reason = decide(payload("Write", "tests/integration/test_x.py"), REPO)
 
     assert reason is not None

@@ -1,8 +1,8 @@
 """LOOP.md is a VIEW of the ledger. The ledger is the source, and it lives outside the
 work tree so that undoing a turn cannot erase the record of it.
 
-The header exists so that a turn which edits LOOP.md by hand -- the one repository file it
-is allowed to write -- is visibly overwriting generated output.
+The header exists so that a turn which edits LOOP.md by hand -- and a turn may write it --
+is visibly overwriting generated output.
 """
 from __future__ import annotations
 
