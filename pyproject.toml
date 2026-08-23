@@ -33,12 +33,19 @@ Issues = "https://github.com/Joorgem/ingestproof/issues"
 packages = ["src/ingestproof"]
 
 [dependency-groups]
+# DEV ONLY, and pyyaml is the reason to say so out loud. The published 0.0.1 wheel has one
+# runtime dependency and gains none from this list: `dependencies` above is what goes into
+# the wheel metadata, and PEP 735 groups do not. pyyaml is here because
+# tests/acceptance/test_ac01_one_declaration.py has to read the job-YAML emitter's output
+# with a parser that is NOT this repository's code -- a round trip through the library's
+# own reader is green for an emitter that emits no YAML at all, measured.
 dev = [
   "hypothesis>=6.140,<7",
   "mypy>=1.18,<2",
   "pytest>=8.4,<9",
   "pytest-cov>=7.0,<8",
   "pytest-timeout==2.4.0",
+  "pyyaml>=6.0,<7",
   "ruff>=0.14,<0.15",
 ]
 

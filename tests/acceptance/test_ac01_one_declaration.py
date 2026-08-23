@@ -33,6 +33,7 @@ import importlib.util
 from pathlib import Path
 
 import pytest
+import yaml
 
 MISSING = importlib.util.find_spec("ingestproof.contracts") is None
 
@@ -112,22 +113,36 @@ def test_one_declaration_comes_out_with_all_five_artefacts() -> None:
 def test_the_job_yaml_round_trips_through_the_resource_mapping() -> None:
     """TASKS item 5: one declaration in, a bundle resource out.
 
-    What this asserts is INVERTIBILITY: the text the emitter writes reads back as the
-    mapping it was written from. What it does not assert is that the text is conformant
-    YAML, and the reason is worth stating rather than hiding -- there is no YAML parser in
-    this repository's frozen dependency set (`pyproject.toml` declares duckdb and nothing
-    else; the dev group has none either), and `pyproject.toml` and `uv.lock` are frozen, so
-    a turn cannot add one. Whoever wants conformance asserted has to add the dependency by
-    hand first. Recorded here so it is a decision someone makes rather than a gap someone
-    discovers.
+    TWO PARSERS, AND THAT IS THE WHOLE OF IT. `load_job_yaml` is the library's own reader,
+    so `load_job_yaml(job_yaml(c)) == job_resource(c)` asserts only that the library
+    inverts itself -- measured green with `job_yaml = repr` and `load_job_yaml =
+    ast.literal_eval`, an emitter producing something no bundle could read. This
+    repository's founding measurement is that a single-parser check cannot detect a
+    single-parser defect, and that check was one.
+
+    PyYAML is in the `dev` group for this assertion and nothing else. It is not a runtime
+    dependency and the published wheel does not gain one. What it establishes is
+    conformance to YAML; it is not the parser the Databricks CLI uses, so a green here is
+    not a proof that the CLI accepts the file.
+
+    It does pin one thing about `job_resource`: its values have to be YAML-native, because
+    a sequence comes back from any YAML parser as a list and never as the tuple the
+    declaration carried.
+
+    The counterexample is not caught by its name, so do not read this as "not written by
+    repr". Measured: `repr` of a mapping of strings, lists and dicts IS valid YAML flow
+    syntax and PyYAML reads it back unchanged. What PyYAML refuses is a repr carrying
+    anything Python-only -- a tuple, a `None`, a string needing a backslash escape.
     """
     from ingestproof.contracts import job_resource, job_yaml, load_job_yaml
 
     contract = _one_declaration()
     text = job_yaml(contract)
+    resource = job_resource(contract)
 
     assert isinstance(text, str)
-    assert load_job_yaml(text) == job_resource(contract)
+    assert load_job_yaml(text) == resource
+    assert yaml.safe_load(text) == resource
 
 
 def _import_source(tmp_path: Path, source: str) -> None:
