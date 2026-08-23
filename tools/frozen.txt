@@ -23,3 +23,5 @@ TASKS.md
 prompt.md
 CLAUDE.md
 AGENTS.md
+# THROWAWAY: this line exists only to prove CI refuses a pull request that touches a
+# frozen path. The pull request is closed and this branch deleted immediately after.
