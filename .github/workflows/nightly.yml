@@ -43,12 +43,23 @@ jobs:
       # This one BLOCKS, and deliberately so. tools/spec_parse is narrower than OFT, so an
       # item in any other OFT-legal form is visible to the JAR and invisible to the inner
       # ring -- unhashed and never Needs-checked. The counts agreeing is the only thing
-      # watching that gap, and unlike coverage it is already true today.
+      # watching that gap.
+      #
+      # It runs its OWN trace, over `.spec` alone, and does not read the report above.
+      # Measured with JAR 4.9.0 over this `.spec/`: `N total` counts every imported
+      # coverage tag as a specobject, so the full report reads 23 with one `[impl->...]`
+      # tag and 24 with two against 22 criteria. Comparing that number against the parser
+      # would go red on the first tag P1 lands and stay red -- a blocking step nobody can
+      # fix. Tracing `.spec` alone reads 22 with those same tags in the tree.
       - name: The JAR and the parser see the same items
         run: uv run python -m tools.oft check-counts
       - uses: actions/upload-artifact@v6
         if: always()
-        with: { name: oft-report, path: oft-report.txt }
+        with:
+          name: oft-report
+          path: |
+            oft-report.txt
+            oft-spec-count.txt
 
   corpus:
     name: corpus pin

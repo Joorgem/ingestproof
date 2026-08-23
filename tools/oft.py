@@ -25,6 +25,10 @@ OFT_URL = (
 )
 DEFAULT_CACHE = Path("vendor") / "oft"
 REPORT_NAME = "oft-report.txt"
+# The count check traces this ONE directory, and nothing else. Everything the fix rests on
+# is in `check_counts` and `trace_spec_only` below.
+SPEC_DIR = ".spec"
+COUNT_REPORT_NAME = "oft-spec-count.txt"
 # Derived from a real report, not guessed. Every ITEM line opens `not ok [`; the one
 # summary line opens `not ok - 22 total, 22 direct, 0 transitive defects`. Anchored at
 # line start and left unanchored at the end, so the CRLF the JAR writes on Windows and
@@ -93,6 +97,29 @@ def trace(root: Path) -> int:
     return result.returncode
 
 
+def trace_spec_only(root: Path) -> Path:
+    """Write a plain report of `.spec` ALONE, and return where it went.
+
+    Separate from `trace` because the two want different inputs. `trace` wants the whole
+    tree, because coverage is the thing it reports. `check_counts` wants only the
+    directory both counters read, because anything else changes the number it compares.
+
+    The JAR's exit code is discarded on purpose: `.spec` traced without a source tree has
+    every criterion uncovered, so this trace ALWAYS exits non-zero and the code says
+    nothing about whether the count is readable. `check_counts` reads the report instead.
+    """
+    assert_java_17()
+    base = root.resolve()
+    jar = ensure_jar(base / DEFAULT_CACHE)
+    report = base / COUNT_REPORT_NAME
+    subprocess.run(
+        (str(java_executable()), "-jar", str(jar), "trace",
+         "-o", "plain", "-f", str(report), SPEC_DIR),
+        cwd=root,
+    )
+    return report
+
+
 def report_item_count(report_text: str) -> int | None:
     """The `N total` from OFT's plain-report summary line, or None if there is no summary.
 
@@ -104,28 +131,52 @@ def report_item_count(report_text: str) -> int | None:
 
 
 def check_counts(root: Path) -> int:
-    """Fail when the JAR and tools/spec_parse disagree on how many items the spec has.
+    """Fail when the JAR and tools/spec_parse disagree on how many items `.spec` has.
 
     tools/spec_parse is deliberately NARROWER than OFT: it requires backticks, pins the
     type to `req`, requires a lowercase name and refuses a second `Needs:` line. So an
     item written in any other OFT-legal form is visible to the JAR and invisible to the
     inner ring -- never hashed, never Needs-checked. The two counts agreeing is the only
-    thing watching that gap, and until now nothing compared them.
+    thing watching that gap.
+
+    IT READS THE SPEC-ONLY REPORT, NOT `oft-report.txt`, and that is the whole of it.
+    OFT's `N total` counts every IMPORTED COVERAGE TAG as a specobject alongside the
+    criteria. Measured with JAR 4.9.0 against the shipped `.spec/`, with the tags written
+    as `impl->req~ac-01~1` and `utest->req~ac-01~1` inside square brackets -- unbracketed
+    here because a well-formed tag in a docstring IS a tag, and writing one in this table
+    would have added itself to the numbers it reports:
+
+        0 tags                                  22 total, 22 direct
+        1 tag  (impl)                           23 total, 22 direct
+        2 tags (impl and utest)                 24 total, 21 direct
+        the same 2 tags, tracing `.spec` alone  22 total, 22 direct
+
+    So against the full trace this check is unsatisfiable from the first coverage tag
+    onwards, and the gap widens with every tag after it. It was green only while coverage
+    was zero -- green for a reason other than the one it claims. Against `.spec` alone the
+    two counters read the same directory and nothing else, which is the comparison the
+    docstring above always described.
     """
-    report = root / REPORT_NAME
+    report = root / COUNT_REPORT_NAME
     if not report.exists():
-        print(f"{REPORT_NAME} is missing; the trace step has to run first", file=sys.stderr)
+        print(
+            f"{COUNT_REPORT_NAME} is missing; trace_spec_only has to run first",
+            file=sys.stderr,
+        )
         return 1
     counted = report_item_count(report.read_text(encoding="utf-8"))
     if counted is None:
-        print(f"no summary line in {REPORT_NAME}; the counts cannot be compared", file=sys.stderr)
+        print(
+            f"no summary line in {COUNT_REPORT_NAME}; the counts cannot be compared",
+            file=sys.stderr,
+        )
         return 1
     parsed = len(parse_dir(root))
     if counted != parsed:
         print(
-            f"OpenFastTrace sees {counted} specification items and tools/spec_parse sees "
-            f"{parsed}. An item the parser cannot read is never hashed and never "
-            f"Needs-checked.",
+            f"OpenFastTrace sees {counted} specification items in {SPEC_DIR} and "
+            f"tools/spec_parse sees {parsed}. They read the same directory, so a criterion "
+            f"is written in a form only one of them accepts.",
             file=sys.stderr,
         )
         return 1
@@ -136,5 +187,8 @@ def check_counts(root: Path) -> int:
 if __name__ == "__main__":
     # `python -m tools.oft` stays the trace, unchanged.
     if sys.argv[1:2] == ["check-counts"]:
+        # The trace and the comparison are one command, because a stale report is a
+        # comparison against a `.spec` that no longer exists.
+        trace_spec_only(Path("."))
         sys.exit(check_counts(Path(".")))
     sys.exit(trace(Path(".")))

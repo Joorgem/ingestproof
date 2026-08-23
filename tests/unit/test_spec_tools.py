@@ -7,11 +7,14 @@ import pytest
 
 from tools.needs_check import items_without_needs
 from tools.oft import (
+    COUNT_REPORT_NAME,
     OFT_SHA256,
     OFT_VERSION,
+    SPEC_DIR,
     check_counts,
     java_executable,
     report_item_count,
+    trace_spec_only,
 )
 from tools.spec_hashes import item_hash, verify, write
 from tools.spec_hashes import main as spec_hashes_main
@@ -197,17 +200,66 @@ def test_a_report_with_no_summary_line_reads_as_unknown() -> None:
 
 
 def test_the_count_check_passes_when_the_jar_and_the_parser_agree(spec_repo: Path) -> None:
-    (spec_repo / "oft-report.txt").write_text(
+    (spec_repo / COUNT_REPORT_NAME).write_text(
         "not ok - 2 total, 2 direct, 0 transitive defects\r\n", encoding="utf-8")
 
     assert check_counts(spec_repo) == 0
 
 
 def test_the_count_check_fails_on_an_item_the_parser_cannot_see(spec_repo: Path) -> None:
-    (spec_repo / "oft-report.txt").write_text(
+    # 3 against 2 in the SPEC-ONLY report is a criterion written in a form OFT
+    # accepts and tools/spec_parse does not. In the FULL report the same arithmetic
+    # is what ONE legitimate coverage tag produces, which is why this test passed
+    # while the check it guards was unsatisfiable. See the two tests below.
+    (spec_repo / COUNT_REPORT_NAME).write_text(
         "not ok - 3 total, 3 direct, 0 transitive defects\r\n", encoding="utf-8")
 
     assert check_counts(spec_repo) == 1
+
+
+def test_the_count_check_does_not_read_the_full_trace_report(spec_repo: Path) -> None:
+    """`oft-report.txt` must not be where the counts come from.
+
+    Measured with JAR 4.9.0 over the shipped `.spec/`: 22 criteria read `22 total` with no
+    coverage, `23 total` with one `impl` tag on `req~ac-01~1` anywhere in the traced tree,
+    and `24 total` with two. The tag count is unbounded, so a check reading that number
+    goes red on the first covered criterion and stays red. (The tags are named without
+    their square brackets here: bracketed, a tag in a docstring is a real tag, and this
+    file is traced.)
+
+    The spec-only report is deliberately absent here and the full one deliberately agrees:
+    point check_counts back at REPORT_NAME and this test goes green on a comparison the
+    check never made.
+    """
+    (spec_repo / "oft-report.txt").write_text(
+        "not ok - 2 total, 2 direct, 0 transitive defects", encoding="utf-8")
+
+    assert check_counts(spec_repo) == 1
+
+
+def test_the_count_trace_reads_the_spec_directory_alone(monkeypatch, tmp_path: Path) -> None:
+    """The input paths named on the JAR's command line are the entire fix.
+
+    Add `src`, `tests`, `loop` or `tools` back to that list and `N total` starts counting
+    imported coverage tags again. Nothing else in this module can notice, because the
+    report it produces still parses.
+    """
+    commands: list[tuple[str, ...]] = []
+
+    def record(command, **kwargs):
+        commands.append(tuple(command))
+
+    monkeypatch.setattr("tools.oft.assert_java_17", lambda: None)
+    monkeypatch.setattr("tools.oft.java_executable", lambda: tmp_path / "java")
+    monkeypatch.setattr("tools.oft.ensure_jar", lambda cache=None: tmp_path / "oft.jar")
+    monkeypatch.setattr("tools.oft.subprocess.run", record)
+
+    report = trace_spec_only(tmp_path)
+
+    assert report == tmp_path / COUNT_REPORT_NAME
+    command = commands[0]
+    # Everything after `-f <report>` is an input path, and there must be exactly one.
+    assert command[command.index(str(report)) + 1 :] == (SPEC_DIR,)
 
 
 def test_the_count_check_fails_when_the_report_is_missing(spec_repo: Path) -> None:
@@ -215,7 +267,7 @@ def test_the_count_check_fails_when_the_report_is_missing(spec_repo: Path) -> No
 
 
 def test_the_count_check_fails_on_a_report_it_cannot_parse(spec_repo: Path) -> None:
-    (spec_repo / "oft-report.txt").write_text("something else entirely\r\n", encoding="utf-8")
+    (spec_repo / COUNT_REPORT_NAME).write_text("something else entirely\r\n", encoding="utf-8")
 
     assert check_counts(spec_repo) == 1
 
