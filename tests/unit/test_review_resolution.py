@@ -4,6 +4,10 @@ and fixing the code look the same from outside.
 """
 from __future__ import annotations
 
+import re
+import subprocess
+from pathlib import Path
+
 from tools.review_resolution import (
     Finding,
     dismissal_section,
@@ -162,3 +166,111 @@ def test_the_dismissal_section_names_every_dismissed_finding() -> None:
 
 def test_the_dismissal_section_is_empty_when_nothing_was_dismissed() -> None:
     assert dismissal_section([]) == ""
+
+
+# --- The generator, not just the consumer -------------------------------------------
+#
+# Everything above feeds `partition` a diff written by hand, and none of those diffs can
+# see a wrong flag on the command that produces the real one. The previous wave ran every
+# invocation form in prompt.md and `--no-renames` survived on line 101, because the diff it
+# ran against contained no rename. So these two read the command OUT OF prompt.md and run
+# it over a repository built to contain the two shapes the flags decide.
+
+PROMPT = Path(__file__).resolve().parents[2] / "prompt.md"
+# Everything between `git diff` and the revision range, however many flags that is --
+# including none, so that DELETING a flag is caught by the assertion it weakens rather
+# than by this pattern failing to match.
+CONTRACT_DIFF = re.compile(
+    r"^git diff (?P<flags>[^\n]*)origin/main\.\.\.HEAD > turn\.diff$", re.MULTILINE
+)
+
+
+def _contract_diff_flags() -> list[str]:
+    """The flags prompt.md's turn-diff line actually carries.
+
+    The revision range is the one thing substituted below -- a scratch repository has no
+    `origin/main`. Everything between `git diff` and the range comes from the contract.
+    """
+    flags = CONTRACT_DIFF.findall(PROMPT.read_text(encoding="utf-8"))
+
+    assert len(flags) == 1, f"prompt.md carries {len(flags)} turn-diff command lines"
+
+    return flags[0].split()
+
+
+def _git(root: Path, *args: str) -> str:
+    out = subprocess.run(
+        ("git", *args), cwd=root, check=True, capture_output=True, text=True
+    )
+    return out.stdout
+
+
+def _repo_with_a_rename_and_an_edit(tmp_path: Path) -> Path:
+    root = tmp_path / "scratch"
+    root.mkdir()
+    _git(root, "init", "-q", ".")
+    # Pinned rather than inherited: a global autocrlf would rewrite the blob between the
+    # two commits and the rename would stop being a pure one. `diff.renames` is NOT pinned
+    # -- a machine that has turned it off is a machine where the contract command really
+    # does false-resolve, and this test is right to go red there.
+    _git(root, "config", "core.autocrlf", "false")
+    _git(root, "config", "user.email", "harness@example.invalid")
+    _git(root, "config", "user.name", "harness")
+    body = "".join(f"line {n}\n" for n in range(1, 41))
+    (root / "old.py").write_text(body, encoding="utf-8", newline="\n")
+    (root / "edited.py").write_text(body, encoding="utf-8", newline="\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "base")
+
+    _git(root, "mv", "old.py", "new.py")
+    (root / "edited.py").write_text(
+        body.replace("line 20\n", "line 20 -- the one real fix\n"),
+        encoding="utf-8",
+        newline="\n",
+    )
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "a pure rename, and one line changed elsewhere")
+    return root
+
+
+def _contract_diff(root: Path) -> str:
+    return _git(root, "diff", *_contract_diff_flags(), "HEAD~1...HEAD")
+
+
+def test_the_contract_command_does_not_resolve_a_finding_on_a_renamed_file(
+    tmp_path: Path,
+) -> None:
+    """`--no-renames` on prompt.md's turn-diff line makes req~ac-16~1 fail OPEN.
+
+    Under it a rename is a delete plus a create, and the delete side claims the WHOLE old
+    file as touched -- so every finding on a renamed file resolves with nothing fixed.
+    Measured on this fixture with a finding at `old.py:25-27` that nothing addresses:
+    `--no-renames` resolves it, git's default dismisses it. Put the flag back and this
+    goes red.
+    """
+    root = _repo_with_a_rename_and_an_edit(tmp_path)
+    finding = Finding("old.py", 25, 27, "nothing in this diff fixed this")
+
+    resolved, dismissed = partition([finding], _contract_diff(root))
+
+    assert resolved == []
+    assert dismissed == [finding]
+
+
+def test_the_contract_command_resolves_only_the_lines_the_edit_replaced(
+    tmp_path: Path,
+) -> None:
+    """`-U0` on the same line, and it fails open in the same direction.
+
+    A hunk header spans its context, so at git's default `-U3` the one-line change to
+    `edited.py:20` reports an old range of 17..23 and a finding three lines away resolves
+    untouched. Drop `-U0` from prompt.md and the first assertion below goes red.
+    """
+    root = _repo_with_a_rename_and_an_edit(tmp_path)
+    beside = Finding("edited.py", 17, 17, "three lines above the change")
+    on_it = Finding("edited.py", 20, 20, "the line the edit replaced")
+
+    resolved, dismissed = partition([beside, on_it], _contract_diff(root))
+
+    assert resolved == [on_it]
+    assert dismissed == [beside]

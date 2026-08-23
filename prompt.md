@@ -98,7 +98,7 @@ after it is a human's.
 the file and the line range it cites, and `partition` is what decides that — not you.
 
 ```bash
-git diff --no-renames -U0 origin/main...HEAD > turn.diff
+git diff -U0 origin/main...HEAD > turn.diff
 uv run python -c "
 from pathlib import Path
 from tools.review_resolution import Finding, dismissal_section, partition
