@@ -59,9 +59,9 @@ HUMAN = "human"
 def is_loop_turn(entry: dict[str, Any]) -> bool:
     """A turn the LOOP ran.
 
-    The stall detector exists to catch the loop spinning without closing anything, so rows
-    from a phase the loop did not run must be inert to it by construction -- P0 is fourteen
-    such rows, and no instruction to a future harness would reliably survive.
+    The stall detector exists to catch the loop spinning without closing anything, so turns
+    from a phase the loop did not run must be inert to it by construction -- every P0 turn is
+    one, and no instruction to a future harness would reliably survive.
 
     The test is "not human" rather than a list of loop author values on purpose. An author
     this code did not predict then counts as a loop turn, so the detector fires when it

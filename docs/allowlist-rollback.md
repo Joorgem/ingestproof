@@ -1,13 +1,20 @@
 # Turning the allowlist hook off
 
-The `PreToolUse` allowlist refuses writes to frozen paths inside this repository. It is
-installed **machine-wide**, in `~/.claude/settings.json`, because a hook the agent could
-edit would be advice rather than a block (design section 7.3).
+The `PreToolUse` allowlist refuses a turn's writes outside the set it may write: `src/**`,
+`tests/unit/**`, `tests/property/**`, `docs/**` and `LOOP.md`. That is wider than the frozen
+set. It is installed **machine-wide**, in `~/.claude/settings.json`, because a hook the agent
+could edit would be advice rather than a block (design section 7.3).
 
-Machine-wide is also its only real risk. If tool calls start failing in *any* project for
-a reason that names ingestproof, use one of the two switches below. Neither weakens the
-gate that matters: a pull request whose diff touches a frozen path fails in CI, with no
-override, whether this hook runs or not.
+Machine-wide is its risk. If tool calls start failing in *any* project for a reason that
+names ingestproof, use one of the two switches below.
+
+**Know what the switch costs before you throw it.** CI re-checks the *frozen* paths, not
+everything this hook refuses, so disarming does not fall back on CI for the rest. Measured
+over the escapes this hook exists to close -- `conftest.py`, `pytest.ini`, `tox.ini`,
+`setup.cfg`, `tests/integration/test_x.py`, `TASKS.md` -- CI's frozen-path gate catches
+`TASKS.md` and nothing else. A root `conftest.py`, measured in this repository turning a red
+acceptance suite green, is checked by this hook alone. Re-arm when the incident is over, and
+read the diff of anything written while it was off.
 
 ## The soft switch — leaves the settings alone
 

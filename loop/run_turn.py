@@ -78,10 +78,9 @@ STALL_LIMIT = 5
 def turns_since_close(entries: Sequence[dict[str, object]]) -> int:
     """Trailing LOOP turns that closed no criterion.
 
-    Human rows are not counted, and that is load-bearing rather than tidy: P0 is fourteen
-    human rows and none of them carries `closed_criterion`, so counting every row would
-    report a stall of fourteen against a limit of five on a ledger nobody looped over --
-    stopping the loop before its first turn.
+    Human turns are not counted, and that is load-bearing rather than tidy: no P0 row carries
+    `closed_criterion`, so counting human turns as well would report a stall on a ledger
+    nobody looped over -- stopping the loop before its first turn.
 
     `closed_criterion` is written by the harness from two signals the agent does not
     control (spec section 7.6): the traceability report, and the frozen acceptance test
@@ -124,8 +123,8 @@ def stall_report(entries: Sequence[dict[str, object]], limit: int = STALL_LIMIT)
     ]
     return "\n".join(lines) + "\n"
 
-# The hook that refuses writes to frozen paths lives in two places: this one, which CI
-# tests, and the installed copy, which is what actually refuses. Nothing keeps them in
+# The hook that refuses a turn's writes lives in two places: this one, which CI tests, and
+# the installed copy, which is what actually refuses. Nothing keeps them in
 # step on its own -- CI cannot see ~/.claude.
 INSTALLED_HOOK = Path.home() / ".claude" / "hooks" / "ingestproof-allowlist.py"
 HOOK_SOURCE = Path("tools") / "hooks" / "ingestproof_allowlist.py"

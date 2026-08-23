@@ -186,9 +186,12 @@ def test_the_kill_switch_disables_the_hook(tmp_path: Path, monkeypatch: pytest.M
 
 
 def test_no_frozen_path_is_writable_by_the_hook() -> None:
-    """The hook cannot import tools.freeze_check -- it runs outside the virtualenv -- so the
-    writable set is stated twice, here and in tools/frozen.txt. This test is the only thing
-    holding the two together: it runs in the virtualenv, where the import is free.
+    """The hook cannot import tools.freeze_check -- it runs outside the virtualenv -- so it
+    cannot read the frozen set it has to stay clear of. This test is what holds the two
+    together: it runs in the virtualenv, where the import is free.
+
+    One direction only, and that is the whole check: nothing frozen may be writable here.
+    The two lists are not complements, so the other direction has nothing to say.
 
     It fails the moment a writable prefix widens over a frozen path, which is the drift that
     would let the hook allow what CI then refuses.
@@ -212,3 +215,22 @@ def test_the_refusal_does_not_call_an_unfrozen_path_frozen() -> None:
     assert reason is not None
     assert "frozen" not in reason
     assert "not writable by a turn" in reason
+
+
+def test_ci_does_not_see_most_of_what_this_hook_refuses() -> None:
+    """The measurement behind the cost paragraph in docs/allowlist-rollback.md.
+
+    Disarming the hook does not fall back on CI, because CI's gate reads the frozen globs
+    and most of these escapes are in none of them. Pinned here so the document cannot drift
+    from the mechanism: freezing one of these paths later must fail this test, not go unread.
+    """
+    from tools.freeze_check import offending_paths
+
+    escapes = ["conftest.py", "pytest.ini", "tox.ini", "setup.cfg",
+               "tests/integration/test_x.py", "TASKS.md"]
+
+    refused = [rel for rel in escapes
+               if decide(payload("Write", rel, INGESTPROOF), INGESTPROOF) is not None]
+
+    assert refused == escapes
+    assert offending_paths(INGESTPROOF, escapes) == ["TASKS.md"]

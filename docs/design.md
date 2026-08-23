@@ -1,4 +1,4 @@
-> Copied on 2026-08-20 from `docs/superpowers/specs/2026-08-18-ingestproof-design.md`.
+> Copied on 2026-08-21 from `docs/superpowers/specs/2026-08-18-ingestproof-design.md`.
 > The origin is the private planning repository; changes land there first. Section 0 of
 > this document is the record of what v1 got wrong, and it is kept deliberately.
 > Where it cites `docs/superpowers/research/ingestproof-measurements.md`, that file is
@@ -179,7 +179,13 @@ O retry de `INTERNAL_ERROR` é reescrito como **invariante**, não reprodução:
 
 A v1 congelava `tests/**` inteiro **e** mandava o agente editar teste (fixar `@example`, matar mutante). Deadlock na primeira falha de propriedade.
 
-**Allowlist, aplicada por hook `PreToolUse` e re-conferida no CI:** o agente escreve **somente** em `src/**`, `tests/unit/**`, `tests/property/**`, `docs/**`, `TASKS.md` não — só `LOOP.md`.
+**Allowlist, aplicada por hook `PreToolUse`:** o agente escreve **somente** em `src/**`, `tests/unit/**`, `tests/property/**`, `docs/**`, `TASKS.md` não — só `LOOP.md`.
+
+> ~~e re-conferida no CI~~ — **corrigido em 21/08/2026, medido.** O CI re-confere a parte
+> **congelada**, não a allowlist inteira: o `freeze_check diff` lê os globs congelados, então um
+> caminho que a allowlist recusa e que não está em nenhum glob — `tests/integration/**` é o
+> exemplo medido — o CI **nunca vê**. Para esses, o hook é a única coisa que recusa, e a §7.3
+> era a autoridade que o próprio hook cita: o documento e o mecanismo discordavam.
 
 **Congelados** (SHA-256 conferido no CI a cada volta): `tests/acceptance/**`, `.spec/**`, `TASKS.md`, `pyproject.toml`, `.github/**`, `.gitattributes`, o gerador de fixtures, e a configuração de cobertura e mutação.
 
