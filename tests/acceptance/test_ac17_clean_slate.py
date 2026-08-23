@@ -10,9 +10,11 @@ This test asserts both halves: that reset alone is insufficient (so nobody "simp
 the runner later), and that reset+clean is sufficient.
 
 The bracketed token below is an OpenFastTrace coverage tag, read by the JAR's tag importer
-out of any file it traces. It is what makes this file the `utest` half of req~ac-17~1 in
-`oft-report.txt`; the criterion also Needs `impl`, so it stays a `not ok [` line reading
-`(-impl, utest)` until something under `src/`, `loop/` or `tools/` carries the impl tag.
+out of any SOURCE file it traces. Measured: the same brackets in markdown are inert, in
+`.spec/` and under `tests/` alike. It is what makes this file the `utest` half of
+req~ac-17~1 in `oft-report.txt`; the criterion also Needs `impl`, so it stays a `not ok [`
+line reading `(-impl, utest)` until something under `src/`, `loop/` or `tools/` carries
+the impl tag.
 
 [utest->req~ac-17~1]
 """

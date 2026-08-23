@@ -45,10 +45,16 @@ Do not read the summary's `N total` as a count of criteria. It counts every impo
 coverage tag as a specobject too: 22 with no coverage, 23 with one tag, 24 with two.
 `uv run python -m tools.oft check-counts` traces `.spec` alone for exactly that reason.
 
-And a coverage tag written in **prose is a real tag**: the JAR reads `utest->req~ac-01~1`
-in square brackets out of any docstring or comment under a traced path (`.spec`, `src`,
-`tests`, `loop`, `tools`). Two such examples, written into a docstring as illustration,
+And a coverage tag written in **prose is a real tag**, in a SOURCE file: the JAR reads
+`utest->req~ac-01~1` in square brackets out of any docstring or comment under `src`,
+`tests`, `loop` or `tools`. Two such examples, written into a docstring as illustration,
 were measured adding themselves to the count they were describing.
+
+Markdown is the exception, and `.spec/acceptance.md` is markdown. The same bracketed tag
+in its prose was measured changing `N total` by zero under both a `.spec`-only and a full
+trace, with the criterion still reading `(-impl, -utest)`; so was one in a `.md` file
+under `tests/`. The error is in the safe direction — such a tag is invisible rather than
+double-counted — but a tag written there covers nothing.
 
 ### How signal 2 is read
 

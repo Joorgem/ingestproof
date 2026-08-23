@@ -221,7 +221,7 @@ def test_the_count_check_does_not_read_the_full_trace_report(spec_repo: Path) ->
     """`oft-report.txt` must not be where the counts come from.
 
     Measured with JAR 4.9.0 over the shipped `.spec/`: 22 criteria read `22 total` with no
-    coverage, `23 total` with one `impl` tag on `req~ac-01~1` anywhere in the traced tree,
+    coverage, `23 total` with one `impl` tag on `req~ac-01~1` in any traced SOURCE file,
     and `24 total` with two. The tag count is unbounded, so a check reading that number
     goes red on the first covered criterion and stays red. (The tags are named without
     their square brackets here: bracketed, a tag in a docstring is a real tag, and this
