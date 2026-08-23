@@ -272,6 +272,21 @@ def test_the_count_check_fails_on_a_report_it_cannot_parse(spec_repo: Path) -> N
     assert check_counts(spec_repo) == 1
 
 
+def test_two_counts_of_zero_are_an_error_not_agreement(tmp_path: Path) -> None:
+    """Both counters reading nothing is not the two of them agreeing on something.
+
+    Measured with JAR 4.9.0 against a tree whose `.spec` holds no criteria: the report is
+    the single line below, the JAR exits 0, report_item_count returns 0, parse_dir returns
+    [], and check_counts printed "agree on 0 specification items" and exited 0. The step
+    BLOCKS in nightly and trace_spec_only discards the JAR's exit code on purpose, so a
+    trace that read nothing was indistinguishable from one that read everything.
+    """
+    (tmp_path / ".spec").mkdir()
+    (tmp_path / COUNT_REPORT_NAME).write_text("ok - 0 total\n", encoding="utf-8")
+
+    assert check_counts(tmp_path) == 1
+
+
 def test_a_spec_with_no_items_is_an_error_not_a_success(tmp_path: Path, monkeypatch) -> None:
     # "0 criterion hashes verified" as a success line is backwards for this project: a
     # missing or unreadable .spec/ would go green exactly as loudly as a verified one.

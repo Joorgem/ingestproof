@@ -171,6 +171,19 @@ def check_counts(root: Path) -> int:
             file=sys.stderr,
         )
         return 1
+    if counted == 0:
+        # Same principle as report_item_count returning None rather than 0, one layer up.
+        # `ok - 0 total` is what the JAR writes for a tree with no `.spec`, and
+        # tools/spec_parse returns [] for that same tree -- so without this the check
+        # passed by reading nothing twice and said "agree on 0 specification items".
+        # This step BLOCKS, and trace_spec_only discards the JAR's exit code on purpose,
+        # so a trace that read nothing has nowhere else to show up.
+        print(
+            f"{COUNT_REPORT_NAME} reports 0 items in {SPEC_DIR}. A trace that read "
+            f"nothing agrees with a parser that read nothing; that is not agreement.",
+            file=sys.stderr,
+        )
+        return 1
     parsed = len(parse_dir(root))
     if counted != parsed:
         print(
