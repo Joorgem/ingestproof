@@ -163,6 +163,16 @@ def _import_source(tmp_path: Path, source: str) -> None:
     spec.loader.exec_module(importlib.util.module_from_spec(spec))
 
 
+# THE PREFIX RULE, SAID ONCE. It is implied by the three sources below read together with
+# `_one_declaration` above, and a rule a reader has to derive from four places at once is
+# not a contract -- it is a guess that happens to be right.
+#
+# No fixture in this file supplies any file groups, so the prefix guard has nothing to
+# check a prefix AGAINST except the declaration's own `name`. What the four cases require:
+# `incidents`/`incidents_` passes; `jobless`/`jobless_` passes, so that the landing-mode
+# guard is what fires for that case and not this one; `orphan`/`matches_nothing_` raises
+# ContractError. `prefix == name + "_"` gives all three, and it is what P1 should write
+# unless it can name another rule that does.
 PREAMBLE = "from ingestproof.contracts import TableContract, declare, register\n"
 
 UNKNOWN_CONTRACT = PREAMBLE + 'register("no-such-contract-id")\n'
