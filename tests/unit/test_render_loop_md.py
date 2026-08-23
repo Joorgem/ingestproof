@@ -56,3 +56,22 @@ def test_it_points_at_the_rollback_instructions_rather_than_carrying_them() -> N
     # in LOOP.md by hand either -- the next render erases them. A pointer in the template
     # is the part that survives, and this is what keeps it there.
     assert "docs/allowlist-rollback.md" in render([])
+
+
+def test_a_correcting_row_is_in_the_chain_but_not_in_the_counts() -> None:
+    # Two rows, one turn. Counting the correction would publish 2, which is the false
+    # headline number this exclusion exists to prevent.
+    out = render([_entry(), _entry(seq=1, corrects_seq=0)])
+
+    assert "Turns: **1**" in out
+    assert "| human | 1 |" in out
+    assert "| GREEN | 1 |" in out
+
+
+def test_the_tip_is_the_last_row_even_when_that_row_is_a_correction() -> None:
+    # The tip anchors the whole chain, not the turns. Excluding corrections from it would
+    # quote a hash that no longer matches the file, which is the one thing the tip is for.
+    out = render([_entry(hash="a" * 64), _entry(seq=1, corrects_seq=0, hash="b" * 64)])
+
+    assert "b" * 64 in out
+    assert "a" * 64 not in out

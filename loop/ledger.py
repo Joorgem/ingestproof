@@ -41,6 +41,18 @@ REQUIRED_FIELDS = (
 )
 
 
+# A row that corrects an earlier row is not a turn. The chain is append-only, so a wrong
+# figure is fixed by appending a row that carries the DIFFERENCE and names the seq it
+# corrects -- which means anything counting turns has to skip it, or the count of turns
+# grows every time a number is fixed. Defined here because it is a property of the schema,
+# and used by both things that count: the LOOP.md rendering and the stall detector.
+CORRECTS = "corrects_seq"
+
+
+def is_turn(entry: dict[str, Any]) -> bool:
+    return entry.get(CORRECTS) is None
+
+
 class LedgerTampered(RuntimeError):
     """The chain does not verify: an entry was edited, reordered or removed."""
 

@@ -32,10 +32,15 @@ That cutoff is not a rounding choice. A row recording the size of the task that 
 cannot include the commit that renders the row, so some cutoff is unavoidable; naming it is
 the part that makes the number checkable.
 
-## What this costs
+## What a correcting row costs, which is nothing
 
-The correcting entry is itself a row, and the renderer counts rows. So `LOOP.md` reports one
-more turn than there were turns, and the author split AC-12 publishes counts the correction
-as human work. The schema has no outcome or author that means "this row corrects another
-row", so an appended correction cannot avoid this. It needs a decision before AC-12 quotes
-the split.
+A correcting row is still a row, and the renderer used to count rows -- so `LOOP.md` briefly
+published fifteen turns for fourteen turns of work. That was fixed rather than written down:
+a row naming the seq it corrects is not a turn, `loop.ledger.is_turn` is the single place
+that says so, and both things that count turns use it -- the `LOOP.md` rendering and the
+stall detector, which would otherwise have walked toward its own limit for bookkeeping.
+
+`LOOP.md` reads `Turns: **14**` and `| human | 14 |`. The chain still holds fifteen rows and
+the tip is still the fifteenth, because the tip anchors the file rather than the turns.
+
+So correcting a figure is cheap. If a later row is found to be wrong, append another.

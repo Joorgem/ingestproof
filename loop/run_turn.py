@@ -10,7 +10,7 @@ import subprocess
 from collections.abc import Sequence
 from pathlib import Path
 
-from loop.ledger import Outcome
+from loop.ledger import Outcome, is_turn
 
 RESET = ("git", "reset", "--hard")
 CLEAN = ("git", "clean", "-fdx", "-e", ".venv")
@@ -85,6 +85,8 @@ def turns_since_close(entries: Sequence[dict[str, object]]) -> int:
     """
     count = 0
     for entry in reversed(list(entries)):
+        if not is_turn(entry):
+            continue  # correcting a figure is not a turn, and must not count as a stall
         if entry.get("closed_criterion"):
             return count
         count += 1
@@ -99,7 +101,7 @@ def stall_report(entries: Sequence[dict[str, object]], limit: int = STALL_LIMIT)
     # Slice by `stalled`, not by `limit`: the headline counts the stalled turns, so listing
     # a different number of them makes the report disagree with itself at exactly the
     # moment a human is reading it to work out why the loop stopped.
-    recent = list(entries)[-stalled:]
+    recent = [entry for entry in entries if is_turn(entry)][-stalled:]
     lines = [
         f"STOPPED: {stalled} consecutive turns closed no criterion (limit {limit}).",
         "",

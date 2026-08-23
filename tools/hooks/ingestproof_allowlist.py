@@ -6,11 +6,13 @@ Scoped. This file is installed globally, and a live flagship lane runs beside th
 Anything outside the ingestproof clone passes untouched.
 
 Fail-open. A hook that raises blocks every tool call in every project on this machine. On
-malformed input it allows and says nothing -- CI is the gate that fails closed.
+malformed input it allows and says nothing.
 
-Defence in depth, not the gate. The authoritative check is CI: a pull request whose diff
-names a frozen path fails, with no override. This only makes that failure immediate. The
-hook covers the editing tools; it cannot parse arbitrary shell, and it is not asked to.
+Two roles, not one. For a frozen path this is defence in depth: CI is authoritative -- a
+pull request whose diff names one fails, with no override -- and this only makes the failure
+immediate. For a path that is neither writable nor frozen, CI never looks, and this is the
+only thing that refuses. Either way it covers the editing tools; it cannot parse arbitrary
+shell, and it is not asked to.
 
 Standard library only: it runs outside the project's virtualenv, so it cannot read
 tools/frozen.txt. tests/unit/test_allowlist_hook.py checks the one direction that matters --

@@ -8,7 +8,15 @@ from pathlib import Path
 
 import pytest
 
-from loop.ledger import GENESIS, LedgerTampered, append, entry_hash, read_all, verify_chain
+from loop.ledger import (
+    GENESIS,
+    LedgerTampered,
+    append,
+    entry_hash,
+    is_turn,
+    read_all,
+    verify_chain,
+)
 
 
 def _turn(**overrides: object) -> dict[str, object]:
@@ -122,3 +130,11 @@ def test_the_default_location_is_outside_any_work_tree(tmp_path: Path, monkeypat
     from loop.ledger import ledger_path
 
     assert ledger_path() == tmp_path / "elsewhere" / "iterations.jsonl"
+
+
+def test_a_row_that_names_the_seq_it_corrects_is_not_a_turn() -> None:
+    # The chain is append-only, so a wrong figure is fixed by appending. Everything that
+    # counts turns has to skip such a row, or the turn count grows every time a number is
+    # corrected -- and that count is what AC-12 publishes.
+    assert is_turn(_turn()) is True
+    assert is_turn(_turn(corrects_seq=13)) is False

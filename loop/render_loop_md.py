@@ -11,7 +11,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from loop.ledger import read_all, verify_chain
+from loop.ledger import is_turn, read_all, verify_chain
 
 HEADER = "<!-- GENERATED FROM $LOOP_HOME/iterations.jsonl -- DO NOT EDIT BY HAND -->"
 
@@ -22,7 +22,10 @@ def _counts_table(title: str, counts: Counter[str]) -> list[str]:
 
 
 def render(entries: list[dict[str, Any]]) -> str:
+    # The tip anchors the WHOLE chain, so it is the last row whatever kind of row that is.
+    # The counts below are counts of turns, which is not the same thing.
     tip = entries[-1]["hash"] if entries else "(empty)"
+    turns = [entry for entry in entries if is_turn(entry)]
     lines = [
         HEADER,
         "",
@@ -37,12 +40,16 @@ def render(entries: list[dict[str, Any]]) -> str:
         "because this file is regenerated: anything added to it by hand is erased by the next",
         "render, which is when nobody is watching.",
         "",
-        f"Turns: **{len(entries)}**",
+        f"Turns: **{len(turns)}**",
         f"Chain tip: `{tip}`",
         "",
+        "Rows that correct an earlier row are in the chain but not in these counts. They",
+        "are not turns, and counting them would grow the number of turns every time a",
+        "figure is corrected.",
+        "",
     ]
-    lines += _counts_table("By author", Counter(str(e["author"]) for e in entries))
-    lines += _counts_table("By outcome", Counter(str(e["outcome"]) for e in entries))
+    lines += _counts_table("By author", Counter(str(e["author"]) for e in turns))
+    lines += _counts_table("By outcome", Counter(str(e["outcome"]) for e in turns))
     return "\n".join(lines) + "\n"
 
 

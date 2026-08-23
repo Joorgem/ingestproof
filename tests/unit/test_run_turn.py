@@ -216,3 +216,29 @@ def test_a_turn_accepts_an_installed_hook_that_matches(
     monkeypatch.setattr(run_turn, "INSTALLED_HOOK", installed)
 
     run_turn.assert_hook_installed(repo)  # must not raise
+
+
+def _correction(seq: int) -> dict[str, object]:
+    return {"seq": seq, "task": "T-x", "outcome": "GREEN", "corrects_seq": 0}
+
+
+def test_a_correcting_row_does_not_count_as_a_stalled_turn() -> None:
+    # A row that fixes a number is not a turn that closed nothing. Counting it would walk
+    # the loop toward its own stall limit for doing bookkeeping.
+    entries = [_e(0, "req~ac-17~1"), _e(1), _correction(2), _e(3)]
+
+    assert turns_since_close(entries) == 2
+
+
+def test_the_stall_report_lists_the_turns_it_counted() -> None:
+    # The headline counts turns, so the list under it must be turns. A correction sitting
+    # in the slice would push a real turn out of a report someone is reading to find out
+    # why the loop stopped.
+    entries = [_e(i) for i in range(STALL_LIMIT)] + [_correction(STALL_LIMIT)]
+
+    report = stall_report(entries)
+
+    assert report is not None
+    assert f"STOPPED: {STALL_LIMIT} consecutive turns" in report
+    assert "T-x" not in report
+    assert f"T-{STALL_LIMIT - 1}" in report
