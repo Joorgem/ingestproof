@@ -11,18 +11,18 @@ off switches, and they are written in `docs/allowlist-rollback.md` rather than h
 because this file is regenerated: anything added to it by hand is erased by the next
 render, which is when nobody is watching.
 
-Turns: **14**
-Chain tip: `e76cd5af45574b660c6b9442d2ac81195c5850412b32bec6f2cf8dcd0e0ac553`
+Turns: **15**
+Chain tip: `03c168b154c91a7e863ad68ffad3e9af507f7241944ac1058a77e1c3128e4664`
 
 ### By author
 
 | | turns |
 |---|---|
-| human | 14 |
+| human | 15 |
 
 ### By outcome
 
 | | turns |
 |---|---|
-| GREEN | 14 |
+| GREEN | 15 |
 
