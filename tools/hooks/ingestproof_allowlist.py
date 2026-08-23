@@ -12,9 +12,10 @@ Defence in depth, not the gate. The authoritative check is CI: a pull request wh
 names a frozen path fails, with no override. This only makes that failure immediate. The
 hook covers the editing tools; it cannot parse arbitrary shell, and it is not asked to.
 
-Standard library only: it runs outside the project's virtualenv. The writable set is
-therefore stated twice, here and in tools/frozen.txt, and
-tests/unit/test_allowlist_hook.py is what holds the two together.
+Standard library only: it runs outside the project's virtualenv, so it cannot read
+tools/frozen.txt. tests/unit/test_allowlist_hook.py checks the one direction that matters --
+nothing frozen is writable here. The two lists are not complements: a path can be refused
+here and not be frozen.
 """
 from __future__ import annotations
 

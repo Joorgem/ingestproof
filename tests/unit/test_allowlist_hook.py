@@ -84,6 +84,9 @@ def test_the_root_escapes_are_refused_by_name(path: str) -> None:
 
     assert reason is not None
     assert path in reason
+    # The generic refusal interpolates the path too, so `path in reason` alone passes with
+    # ROOT_ESCAPES deleted entirely. Measured. This is the phrase only the escape can produce.
+    assert "refused at the repository root" in reason
 
 
 def test_a_test_file_outside_tests_is_refused() -> None:
@@ -102,6 +105,15 @@ def test_a_path_outside_the_repository_is_none_of_the_hooks_business() -> None:
              "tool_input": {"file_path": str(REPO.parent / "open-payments-lakehouse" / "x.py")}}
 
     assert decide(other, REPO) is None
+
+
+def test_a_sibling_whose_name_extends_the_root_is_outside_it() -> None:
+    # The single property that keeps every other repository on this machine safe: the scope
+    # check compares path COMPONENTS, not string prefixes. Swapping relative_to for a
+    # str.startswith left every other test in this file green. Measured.
+    sibling = {"tool_name": "Write", "tool_input": {"file_path": str(REPO) + "-notes/TASKS.md"}}
+
+    assert decide(sibling, REPO) is None
 
 
 def test_a_non_editing_tool_is_ignored() -> None:
@@ -157,11 +169,13 @@ def test_main_fails_open_when_decide_raises(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_the_repository_root_can_be_pointed_elsewhere(monkeypatch: pytest.MonkeyPatch) -> None:
-    # main() takes no repo argument, so INGESTPROOF_REPO is the only way to test it against
-    # anything but this machine's clone.
-    monkeypatch.setenv("INGESTPROOF_REPO", str(REPO.parent / "somewhere-else"))
+    # Both directions, because asserting only that the old root goes quiet is vacuous: it
+    # goes quiet whether the override works or is ignored entirely. Measured.
+    other = REPO.parent / "other-clone"
+    monkeypatch.setenv("INGESTPROOF_REPO", str(other))
 
-    assert main(json.dumps(payload("Write", "TASKS.md"))) == 0
+    assert main(json.dumps(payload("Edit", "TASKS.md", other))) == 2
+    assert main(json.dumps(payload("Edit", "TASKS.md", REPO))) == 0
 
 
 def test_the_kill_switch_disables_the_hook(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
