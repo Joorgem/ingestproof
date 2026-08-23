@@ -33,9 +33,16 @@ pytestmark = pytest.mark.xfail(
 
 BATCH_ID = "2026-08-23T00:00:00Z"
 
-# Four parsed records and one rule. `id` 3 is what the gate rejects; `id` 4 is what no rule
-# can evaluate at all, and fail-closed is the requirement that it goes to quarantine rather
-# than to promote.
+# Four parsed records and one rule. `id` 3 is what the gate REJECTS; `id` 4 is what the
+# gate CANNOT EVALUATE -- it has no `name` key and the rule subscripts it, so evaluating
+# the rule raises.
+#
+# The subscript is the whole of it. This rule was `record.get("name") is not None`, and
+# `.get` answers None rather than raising: there was no unevaluable state for an
+# implementation to mishandle, and all five tests below passed against a `partition_batch`
+# that is `all(fn(record) for _name, fn in rules)` with no exception handling at all.
+# Measured. A test for fail-closed that cannot tell fail-closed from fail-open is the
+# defect this repository exists to catch, one layer up.
 RECORDS = (
     {"id": "1", "name": "ok"},
     {"id": "2", "name": "also ok"},
@@ -43,7 +50,7 @@ RECORDS = (
     {"id": "4"},
 )
 
-RULES = (("name_not_null", lambda record: record.get("name") is not None),)
+RULES = (("name_not_null", lambda record: record["name"] is not None),)
 
 
 def _partition():
@@ -71,10 +78,14 @@ def test_the_gate_rejects_into_quarantine_and_not_into_loss() -> None:
 def test_a_record_no_rule_can_evaluate_is_quarantined_not_promoted() -> None:
     """Fail-closed, which is TASKS item 4's own word.
 
-    Record 4 has no `name` key at all. A gate that treats "cannot evaluate" as "passes"
-    promotes it, and the fidelity check then compares against a bronze table holding a
-    record nothing vouched for. The direction of the failure is the requirement: an
-    unevaluable record is quarantined, never promoted.
+    Evaluating the one rule against record 4 raises. Three things an implementation can do
+    with that, and only the third is fail-closed:
+
+    - let the exception escape: this test errors, and an error is red;
+    - treat "cannot evaluate" as "passes": record 4 is promoted, the second assertion
+      below goes red, and the fidelity check would then be comparing against a bronze
+      table holding a record nothing vouched for;
+    - quarantine it. That is the requirement, and it is the only way this passes.
     """
     batch = _partition()
 
