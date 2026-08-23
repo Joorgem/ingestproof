@@ -13,3 +13,9 @@ htmlcov/
 .coverage
 oft-report.txt
 oft-spec-count.txt
+# Written into the repository root by the turn contract in prompt.md, at the end of a
+# turn, and `git add -A` would otherwise commit both. Ignored rather than relocated so
+# the contract's commands stay runnable verbatim from the root, like the two above; the
+# next turn's `git clean -fdx` removes them, so neither can go stale.
+turn.diff
+dismissed.md
