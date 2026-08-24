@@ -51,7 +51,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import cast
 
-from ingestproof.contracts import ContractError
+from ingestproof.contracts import ContractError, type_name
 
 type Rule = tuple[str, Callable[..., object]]
 
@@ -75,7 +75,7 @@ def _describe(value: object) -> str:
     """
     if type(value) is str:
         return repr(value)
-    return "<" + cast("str", type.__dict__["__name__"].__get__(type(value))) + ">"
+    return "<" + type_name(value) + ">"
 
 
 def quality_rules(*declared: object) -> tuple[Rule, ...]:

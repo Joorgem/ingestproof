@@ -482,3 +482,38 @@ def test_the_registry_is_isolated_between_unit_tests() -> None:
 
     with pytest.raises(ContractError, match="unknown contract"):
         register("shared@1")
+
+
+def test_type_name_answers_the_real_name_and_runs_no_caller_code() -> None:
+    """The shared helper `rules` and `promotion` both reach for.
+
+    It lives in `contracts` because this is its third occurrence. A metaclass `__name__`
+    property intercepted the read in `rules._describe`, where it turned a `ContractError`
+    into the caller's exception; and again in `promotion`, where the value being named was
+    the type of an exception a rule had just raised -- and there it broke fail-closed
+    outright, which IS that module's criterion.
+    """
+    ran: list[str] = []
+
+    class RecordingMeta(type):
+        @property
+        def __name__(cls) -> str:
+            ran.append("name")
+            return "Innocent"
+
+    class Recorded(metaclass=RecordingMeta):
+        pass
+
+    class ExplodingMeta(type):
+        @property
+        def __name__(cls) -> str:
+            raise RuntimeError("the caller's metaclass exploded")
+
+    class Exploded(metaclass=ExplodingMeta):
+        pass
+
+    assert contracts.type_name(Recorded()) == "Recorded"
+    assert contracts.type_name(Exploded()) == "Exploded"
+    assert contracts.type_name("plain") == "str"
+    assert contracts.type_name(7) == "int"
+    assert ran == []

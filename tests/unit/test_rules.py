@@ -142,8 +142,13 @@ def test_no_module_in_the_shipped_package_imports_spark_at_any_depth() -> None:
     # one-file scan while still reaching the declaration layer.
     banned = set(_frozen_banned())
     modules = sorted(PACKAGE.glob("*.py"))
+    names = {path.name for path in modules}
 
-    assert [path.name for path in modules] == ["__init__.py", "contracts.py", "rules.py"]
+    # A superset rather than an exact list: the scan covers whatever the package holds, so
+    # pinning the filenames would break on every module that joins it and say nothing. The
+    # three named here are the ones `import ingestproof.rules` actually reaches, and the
+    # assertion exists so the loop below cannot be vacuously green over an empty glob.
+    assert names >= {"__init__.py", "contracts.py", "rules.py"}
 
     for path in modules:
         assert _imported_roots(path.read_text(encoding="utf-8")).isdisjoint(banned), path.name
