@@ -1,9 +1,9 @@
 """One declaration per table: the fields, the import-time guards, the job resource.
 
 Generalised out of the flagship's `src/opl/bronze/registry.py`, with no CNPJ vocabulary
-travelling with it. A declaration is data; `declare` is the only thing that judges one,
-and it judges while the declaring module's body is still running -- so a malformed
-declaration refuses at import rather than waiting for someone to call into it.
+travelling with it. A declaration is data; `declare` is what judges one, and it judges
+while the declaring module's body is still running -- so a malformed declaration refuses
+at import rather than waiting for someone to call into it.
 
 WHAT THE JOB RESOURCE CARRIES, and why it is not a deployable task chain. This library
 publishes no job scripts, so an emitter naming `python_file: ../src/<name>_ingest.py`
@@ -16,9 +16,17 @@ THE YAML IS EMITTED AND READ BY THIS MODULE, in a deliberately small subset: two
 indentation, mappings, sequences, and single-quoted scalars. Values are ALWAYS quoted and
 keys are quoted unless they are plainly safe, because YAML 1.1 reads `on` as a boolean
 and `2026-08-23` as a date -- a table named either would round trip through this module's
-own reader and come back as the wrong type from any other parser.
+own reader and come back as the wrong type from PyYAML.
 `tests/acceptance/test_ac01_one_declaration.py` holds PyYAML against the same text for
 exactly that reason; this module is one of the two parsers, never both.
+
+THE READER IS THE EMITTER'S INVERSE AND NOTHING WIDER. It refuses every document this
+module could not have written -- a bare value, a bare key that is not one `_emit_key`
+would leave bare, a half-quoted scalar. That is not strictness for its own sake: a reader
+that accepts more than the emitter writes is a reader that can disagree with the referee,
+and the disagreement is invisible because both halves are ours. It reports no line
+numbers, deliberately: the blank-line filter below makes an index into the filtered list
+the wrong number, and a position computed wrongly is worse than none.
 
 [impl->req~ac-01~1]
 """
@@ -27,7 +35,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 
 # The job parameter's default, and its whole job is to fail. A job parameter has to have
 # SOME default and no batch id is a valid one, so a default that happened to be a real
@@ -65,15 +73,35 @@ RESERVED_PLAIN_WORDS = frozenset(
     }
 )
 
-# U+2028 LINE SEPARATOR and U+2029 PARAGRAPH SEPARATOR. YAML 1.1 section 4.1 lists both as
-# line breaks. PyYAML 6 does NOT -- measured, both round trip through it unchanged -- so
-# this refusal is not for the referee in the acceptance test but for the parser that reads
-# a bundle, exactly as `y` and `n` stay in RESERVED_PLAIN_WORDS above.
+# U+2028 LINE SEPARATOR and U+2029 PARAGRAPH SEPARATOR. YAML 1.1 lists both as line
+# breaks. PyYAML 6 does NOT -- measured, both round trip through it unchanged -- so this
+# refusal is not for the referee in the acceptance test but for the parser that reads a
+# bundle, exactly as `y` and `n` stay in RESERVED_PLAIN_WORDS above.
 YAML_LINE_SEPARATORS = ("\u2028", "\u2029")
+
+# The two non-characters, and they are here because CATEGORY IS THE WRONG QUESTION for
+# them. Measured against PyYAML 6's own Reader.NON_PRINTABLE, the code points it refuses
+# outright are U+0000..0008, U+000B..000C, U+000E..001F, U+007F..0084, U+0086..009F,
+# U+FFFE..FFFF and the surrogates. Category `Cc` covers the four middle ranges; category
+# `Cn` would cover U+FFFE and U+FFFF but ALSO U+FDD0, which PyYAML reads back unchanged --
+# so `Cn` refuses more than measurement asks for. These two are named instead.
+NONCHARACTERS = ("\ufffe", "\uffff")
+
+# YAML bounds a simple key at 1024 characters. Measured: a table name of 1024 round trips
+# through PyYAML and 1025 raises ScannerError, while a VALUE of 5000 is fine -- the bound
+# is the key's, so it is checked where the key token is built and nowhere else.
+MAX_SIMPLE_KEY = 1024
 
 INDENT = 2
 
-Yaml = str | list["Yaml"] | dict[str, "Yaml"]
+# Two columns, and it is the same two as INDENT rather than coincidentally equal: a
+# sequence item's children are emitted at `indent + INDENT` and have to line up under the
+# text that follows the dash. Measured -- emitting at INDENT=3 or INDENT=4 leaves this
+# module's own reader round tripping while PyYAML raises ParserError. INDENT is therefore
+# not configuration, and `test_the_marker_and_the_indent_are_one_number` says so.
+SEQUENCE_MARKER = "- "
+
+type Yaml = str | list[Yaml] | dict[str, Yaml]
 
 
 class ContractError(Exception):
@@ -105,6 +133,12 @@ class TablePlan:
     job_yaml: str
 
 
+# PROCESS-WIDE, and that is a real cost rather than an oversight. `register` takes an id
+# and nothing else -- the frozen acceptance test calls `register("no-such-contract-id")`
+# from a module that imported only the three public names -- so the mapping has to live
+# somewhere the lookup can reach without being handed it. The cost is that declarations
+# leak between callers in one process, which for the test ring is handled by the autouse
+# fixture in `tests/unit/conftest.py`.
 _REGISTRY: dict[str, TableContract] = {}
 
 
@@ -128,8 +162,8 @@ def register(contract_id: str) -> TableContract:
     """Look a declared contract up by id, or refuse.
 
     The registry maps one id to one contract, and `declare` refuses to rebind an id to a
-    different table -- not a fourth guard, but the invariant that makes this a lookup: an
-    id that could answer either of two contracts answers nothing.
+    different declaration -- not a fourth guard, but the invariant that makes this a
+    lookup: an id that could answer either of two contracts answers nothing.
     """
     try:
         return _REGISTRY[contract_id]
@@ -151,8 +185,14 @@ def declare(contract: TableContract) -> TablePlan:
 
     already = _REGISTRY.get(contract.contract_id)
     if already is not None and already != contract:
+        differing = ", ".join(
+            field.name
+            for field in fields(contract)
+            if getattr(already, field.name) != getattr(contract, field.name)
+        )
         raise ContractError(
-            f"contract {contract.contract_id!r} is already bound to table {already.name!r}"
+            f"contract {contract.contract_id!r} is already bound to a declaration that "
+            f"differs in {differing}"
         )
 
     # THE PLAN IS BUILT BEFORE THE REGISTRY IS TOUCHED, and the order is the whole point.
@@ -184,9 +224,8 @@ def declare(contract: TableContract) -> TablePlan:
 def job_resource(contract: TableContract) -> dict[str, Yaml]:
     """One declaration in, one bundle resource out. Every value is a string, on purpose.
 
-    A sequence comes back from any YAML parser as a list and never as the tuple the
-    declaration carried, so nothing here may be a tuple; and nothing may be None, which
-    is the other thing a YAML round trip cannot return unchanged as itself.
+    A sequence comes back from PyYAML as a list and never as the tuple the declaration
+    carried, so nothing here may be a tuple; and nothing here is None.
     """
     return {
         "resources": {
@@ -209,6 +248,7 @@ def job_resource(contract: TableContract) -> dict[str, Yaml]:
 
 
 def job_yaml(contract: TableContract) -> str:
+    """The bundle resource as text, in the subset `load_job_yaml` reads back."""
     return _emit(job_resource(contract), 0) + "\n"
 
 
@@ -218,12 +258,17 @@ def load_job_yaml(text: str) -> Yaml:
     It is one of the two parsers the acceptance criterion needs, never both: a round trip
     through a single parser is green for an emitter that emits no YAML at all.
     """
-    lines = [line for line in text.split("\n") if line.strip()]
+    # A BOM and a CR are both things a file acquires on the way to disk rather than from
+    # this emitter. Measured: written with `encoding="utf-8-sig"` and read back plainly,
+    # the un-normalised reader answered a top-level key of \ufeff-resources with no
+    # error at all -- a structurally valid mapping that is simply the wrong one.
+    normalised = text.removeprefix("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
+    lines = [line for line in normalised.split("\n") if line.strip()]
     if not lines:
         raise ContractError("empty document")
     value, consumed = _read(lines, 0, _indent_of(lines[0]))
     if consumed != len(lines):
-        raise ContractError(f"trailing content at line {consumed + 1}: {lines[consumed]!r}")
+        raise ContractError(f"trailing content below the document: {lines[consumed]!r}")
     return value
 
 
@@ -232,15 +277,21 @@ def _quote(value: str) -> str:
     # FOLDS -- it comes back as a space -- so emitting a declaration that carries one
     # would round trip through a different string, silently. Refuse instead.
     #
-    # CATEGORY `Cc`, NOT A CODE-POINT RANGE. `ord(c) < 0x20 or ord(c) == 0x7F` stood here
-    # and let the C1 block through: measured, U+0085 does not round trip through PyYAML 6
-    # and U+009F makes its reader raise. `Cc` is both blocks and nothing else.
-    if any(unicodedata.category(character) == "Cc" for character in value) or any(
-        separator in value for separator in YAML_LINE_SEPARATORS
-    ):
-        raise ContractError(
-            f"control character or line separator in {value!r}: it has no one-line YAML scalar"
-        )
+    # CATEGORY `Cc` AND `Cs`, PLUS TWO NAMED CODE POINTS. `ord(c) < 0x20 or ord(c) ==
+    # 0x7F` stood here and let the C1 block through: measured, U+0085 does not round trip
+    # through PyYAML 6 and U+009F makes its reader raise. `Cc` is both control blocks;
+    # `Cs` is the surrogates, which PyYAML's reader also refuses; and NONCHARACTERS is the
+    # last pair, which no category names without naming more than measurement asks for.
+    for character in value:
+        if (
+            unicodedata.category(character) in ("Cc", "Cs")
+            or character in YAML_LINE_SEPARATORS
+            or character in NONCHARACTERS
+        ):
+            raise ContractError(
+                f"control character or line separator in {value!r}: "
+                "it has no one-line YAML scalar"
+            )
     return "'" + value.replace("'", "''") + "'"
 
 
@@ -253,11 +304,9 @@ def _unquote(token: str) -> str:
 def _scalar(token: str) -> str:
     """A VALUE, which this module always emits quoted -- so anything else is not ours.
 
-    `_unquote` alone read `'unterminated` as the seven-plus-one characters it looks like,
-    because it only strips when both ends are quotes. That is a document this emitter
-    cannot produce and no YAML parser accepts, being read as data.
-
-    Keys are not put through this: a plainly safe key is emitted bare, on purpose.
+    `_unquote` alone read `'unterminated` as the string it looks like, because it only
+    strips when both ends are quotes. That is a document this emitter cannot produce and
+    PyYAML refuses, being read as data.
     """
     if not token.startswith("'") or _closing_quote(token) != len(token) - 1:
         raise ContractError(f"value is not one complete single-quoted scalar: {token!r}")
@@ -265,14 +314,32 @@ def _scalar(token: str) -> str:
 
 
 def _emit_key(key: str) -> str:
-    if PLAIN_KEY.match(key) and key not in RESERVED_PLAIN_WORDS:
-        return key
-    return _quote(key)
+    token = key if PLAIN_KEY.match(key) and key not in RESERVED_PLAIN_WORDS else _quote(key)
+    if len(token) > MAX_SIMPLE_KEY:
+        raise ContractError(
+            f"key is {len(token)} characters and YAML bounds a simple key at "
+            f"{MAX_SIMPLE_KEY}: {key[:40]!r}..."
+        )
+    return token
 
 
-def _emit(node: Yaml, indent: int) -> str:
-    if isinstance(node, str):
-        raise ContractError("a scalar is emitted by its parent, never as a document")
+def _read_key(token: str) -> str:
+    """The inverse of `_emit_key`, and refusing anything it would not have written.
+
+    Without this the reader answered `{'on': 'v'}` where PyYAML answers `{True: 'v'}` --
+    the emitter quotes that key precisely so the two agree, and a reader accepting the
+    bare form re-opened the hole from the other side.
+    """
+    if token.startswith("'"):
+        if _closing_quote(token) != len(token) - 1:
+            raise ContractError(f"key is not one complete single-quoted scalar: {token!r}")
+        return _unquote(token)
+    if not PLAIN_KEY.match(token) or token in RESERVED_PLAIN_WORDS:
+        raise ContractError(f"key is not one this module would emit bare: {token!r}")
+    return token
+
+
+def _emit(node: list[Yaml] | dict[str, Yaml], indent: int) -> str:
     if not node:
         raise ContractError("an empty mapping or sequence has no round trip")
     if isinstance(node, list):
@@ -297,11 +364,11 @@ def _emit_sequence(node: list[Yaml], indent: int) -> str:
     lines = []
     for item in node:
         if isinstance(item, str):
-            lines.append(f"{pad}- {_quote(item)}")
+            lines.append(f"{pad}{SEQUENCE_MARKER}{_quote(item)}")
             continue
         block = _emit(item, indent + INDENT)
         first, _, rest = block.partition("\n")
-        lines.append(pad + "- " + first[indent + INDENT :])
+        lines.append(pad + SEQUENCE_MARKER + first[indent + INDENT :])
         if rest:
             lines.append(rest)
     return "\n".join(lines)
@@ -342,7 +409,7 @@ def _split_entry(content: str) -> tuple[str, str]:
 
 
 def _read(lines: list[str], start: int, indent: int) -> tuple[Yaml, int]:
-    if lines[start].lstrip(" ").startswith("- "):
+    if lines[start].lstrip(" ").startswith(SEQUENCE_MARKER):
         return _read_sequence(lines, start, indent)
     return _read_mapping(lines, start, indent)
 
@@ -353,10 +420,10 @@ def _read_mapping(lines: list[str], start: int, indent: int) -> tuple[Yaml, int]
     while (
         index < len(lines)
         and _indent_of(lines[index]) == indent
-        and not lines[index].lstrip(" ").startswith("- ")
+        and not lines[index].lstrip(" ").startswith(SEQUENCE_MARKER)
     ):
         key_token, value_token = _split_entry(lines[index].strip())
-        key = _unquote(key_token)
+        key = _read_key(key_token)
         if value_token:
             out[key] = _scalar(value_token)
             index += 1
@@ -375,14 +442,22 @@ def _read_sequence(lines: list[str], start: int, indent: int) -> tuple[Yaml, int
     while (
         index < len(lines)
         and _indent_of(lines[index]) == indent
-        and lines[index].lstrip(" ").startswith("- ")
+        and lines[index].lstrip(" ").startswith(SEQUENCE_MARKER)
     ):
-        rest = lines[index].lstrip(" ")[2:]
+        rest = lines[index].lstrip(" ")[len(SEQUENCE_MARKER) :]
         if rest.startswith("'") and _closing_quote(rest) == len(rest) - 1:
             out.append(_unquote(rest))
             index += 1
             continue
         value, consumed = _read([" " * inner + rest, *lines[index + 1 :]], 0, inner)
+        # `_read` answers 0 when the line it was handed does not sit at the indent it was
+        # called with, which happens here for any entry whose dash is followed by more
+        # than one space -- `-  'a'`. Without this the index never advances, the same line
+        # is re-read forever and `out` grows without bound: measured at 1.2 million calls
+        # in three seconds on a two-line document. A loop that can fail to advance is the
+        # defect; refusing the input is only the instance.
+        if consumed == 0:
+            raise ContractError(f"sequence entry is not indented by {INDENT}: {lines[index]!r}")
         out.append(value)
         index += consumed
     return out, index

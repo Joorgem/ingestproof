@@ -1,11 +1,11 @@
 """Unit ring for `ingestproof.contracts`.
 
-The frozen acceptance test judges the criterion; this file judges the parts of the module
+The frozen acceptance test judges the criterion; this file also judges the parts of the module
 the criterion does not reach -- the module-level constants, the reader's refusals, and the
 quoting rule, which has a control arm because a rule against a hazard that does not exist
 is green forever and proves nothing.
 
-mutmut 3 mutates INSIDE functions only, so every module-level constant here gets an
+mutmut 3 mutates INSIDE functions only, so every module-level constant the module exports gets an
 assertion on its VALUE. Without one the mutation gate is silently inert on it.
 """
 
@@ -52,9 +52,6 @@ def _contract(**overrides: object) -> TableContract:
         "constraints": (("id_not_null", "id IS NOT NULL"),),
     }
     fields.update(overrides)
-    name = fields["name"]
-    assert isinstance(name, str)
-    fields.setdefault("prefix", name + "_")
     return TableContract(**fields)  # type: ignore[arg-type]
 
 
@@ -183,7 +180,7 @@ def test_declaring_the_same_contract_twice_is_not_a_refusal() -> None:
 def test_one_contract_id_may_not_answer_two_different_tables() -> None:
     declare(_named("first_table", "shared@1"))
 
-    with pytest.raises(ContractError, match="already bound"):
+    with pytest.raises(ContractError, match="already bound to a declaration that differs in"):
         declare(_named("second_table", "shared@1"))
 
 
@@ -270,23 +267,34 @@ def test_trailing_content_below_the_document_is_refused() -> None:
 
 
 @pytest.mark.parametrize(
-    ("node", "message"),
-    (
-        ("scalar", "emitted by its parent"),
-        ({}, "empty mapping or sequence"),
-        ([], "empty mapping or sequence"),
-        ({"k": {}}, "empty mapping or sequence"),
-    ),
-    ids=("bare-scalar", "empty-mapping", "empty-sequence", "empty-nested"),
+    "node",
+    ({}, [], {"k": {}}),
+    ids=("empty-mapping", "empty-sequence", "empty-nested"),
 )
-def test_the_emitter_refuses_what_has_no_round_trip(node: object, message: str) -> None:
-    with pytest.raises(ContractError, match=message):
+def test_the_emitter_refuses_a_container_with_no_round_trip(node: object) -> None:
+    #  used to take , so it also needed a branch refusing a bare scalar --
+    # a case reachable only by a caller mypy already rejects. Narrowing the parameter to
+    #  deleted the branch and this test's fourth case with it.
+    with pytest.raises(ContractError, match="empty mapping or sequence"):
         contracts._emit(node, 0)  # type: ignore[arg-type]
 
 
 # --- what the review raised, each measured before it was fixed -------------------------
 
-UNEMITTABLE = ("\x00", "\n", "\r", "\t", "\x7f", "\x85", "\x9f", "\u2028", "\u2029")
+UNEMITTABLE = (
+    "\x00",
+    "\n",
+    "\r",
+    "\t",
+    "\x7f",
+    "\x85",
+    "\x9f",
+    "\u2028",
+    "\u2029",
+    "\ud800",
+    "\ufffe",
+    "\uffff",
+)
 
 
 def test_a_declaration_declare_refused_is_not_findable_through_register() -> None:
@@ -319,7 +327,7 @@ def test_a_character_with_no_one_line_scalar_is_refused_rather_than_emitted(
 def test_the_guard_asks_a_category_because_a_code_point_range_missed_the_c1_block() -> None:
     """What the range let through, measured rather than argued.
 
-    `ord(c) < 0x20 or ord(c) == 0x7F` stood here and admits U+0080..U+009F. Held against
+    `ord(c) < 0x20 or ord(c) == 0x7F` stood in  and admits U+0080..U+009F. Held against
     PyYAML 6: U+0085 comes back as a DIFFERENT string, and U+009F makes the reader raise.
     Both are category `Cc`, which is what the guard asks for now.
     """
@@ -356,3 +364,121 @@ def test_a_value_this_module_could_not_have_emitted_is_refused_and_not_read(
     # BOTH ends are quotes, so a half-quoted token came back as data.
     with pytest.raises(ContractError):
         load_job_yaml(document)
+
+
+# --- what the second review round raised, all of it measured first ---------------------
+
+
+def test_the_marker_and_the_indent_are_one_number_and_not_two() -> None:
+    """`INDENT` reads like configuration and is not.
+
+    `_emit_sequence` writes `SEQUENCE_MARKER` and its children go at `indent + INDENT`, so
+    the children only line up under the text after the dash while the two are equal.
+    Measured at INDENT=3 and INDENT=4: this module's own reader still round trips and
+    PyYAML raises ParserError -- the exact single-parser split the module exists to avoid.
+    """
+    assert contracts.SEQUENCE_MARKER == "- "
+    assert len(contracts.SEQUENCE_MARKER) == INDENT
+    assert contracts.NONCHARACTERS == ("\ufffe", "\uffff")
+    assert contracts.MAX_SIMPLE_KEY == 1024
+
+
+def test_a_sequence_entry_indented_by_anything_else_is_refused_and_does_not_hang() -> None:
+    """One extra space after the dash used to be an unbounded loop.
+
+    `_read` answers 0 when the line it is handed does not sit at the indent it was called
+    with. `_read_sequence` then did `index += 0`, re-read the same line and appended to
+    `out` forever: measured at roughly 1.2 million calls in three seconds on a two-line
+    document, so unbounded memory rather than a spin. PyYAML reads both of these fine,
+    which is what made it a divergence rather than merely a hang.
+
+    The guard is on `consumed == 0` rather than on the space, because the defect is a loop
+    that can fail to advance and the space is only the instance that reaches it.
+    """
+    for document in ("-  'a'\n", "k:\n  -  'a'\n"):
+        with pytest.raises(ContractError, match="not indented by"):
+            load_job_yaml(document)
+
+
+@pytest.mark.parametrize(
+    "document",
+    ("on: 'v'\n", "null: 'v'\n", "yes: 'v'\n", "123: 'v'\n", "2026-08-23: 'v'\n"),
+    ids=("on", "null", "yes", "int", "date"),
+)
+def test_a_bare_key_this_module_would_have_quoted_is_refused_by_the_reader(
+    document: str,
+) -> None:
+    """The emitter quotes these keys so the two parsers agree; the reader reopened it.
+
+    Measured before `_read_key` existed: `load_job_yaml("on: 'v'")` answered `{'on': 'v'}`
+    where PyYAML answers `{True: 'v'}`, and the same for `null`, `yes`, `123` and a date.
+    Closing it on the value side with `_scalar` and leaving the key side open made the
+    reader wider than the emitter in exactly the place `RESERVED_PLAIN_WORDS` exists.
+    """
+    with pytest.raises(ContractError, match="would emit bare"):
+        load_job_yaml(document)
+
+
+def test_the_quoted_form_of_those_same_keys_is_what_the_reader_accepts() -> None:
+    # The control arm for the test above: without it, that one is equally green for a
+    # reader that refuses every key.
+    assert load_job_yaml("'on': 'v'\n") == {"on": "v"}
+    assert load_job_yaml("'2026-08-23': 'v'\n") == {"2026-08-23": "v"}
+
+
+def test_a_byte_order_mark_is_stripped_rather_than_read_as_part_of_the_first_key() -> None:
+    """A BOM is something a file acquires on the way to disk, not something we emit.
+
+    Measured before `load_job_yaml` normalised: a document written with
+    `encoding="utf-8-sig"` and read back plainly gave a top-level key of `'\ufeffresources'`
+    with no exception -- a structurally valid mapping that is simply the wrong one, which
+    is the silent-mis-parse case rather than a refusal.
+    """
+    contract = _contract()
+    text = job_yaml(contract)
+
+    assert load_job_yaml("\ufeff" + text) == job_resource(contract)
+    assert load_job_yaml(text.replace("\n", "\r\n")) == job_resource(contract)
+    assert load_job_yaml("\ufeff" + text.replace("\n", "\r\n")) == job_resource(contract)
+
+
+@pytest.mark.parametrize(("length", "refused"), ((1023, False), (1024, False), (1025, True)))
+def test_a_table_name_past_yamls_simple_key_bound_is_refused(length: int, refused: bool) -> None:
+    """YAML bounds a simple key at 1024 characters and this module emits `name` as a key.
+
+    Measured against PyYAML 6: 1024 round trips, 1025 raises ScannerError while this
+    module's own reader reads it back happily. A VALUE of 5000 characters is fine on both
+    sides, so the bound belongs on the key token and nowhere else.
+    """
+    contract = _named("a" * length, "long@1")
+
+    if refused:
+        with pytest.raises(ContractError, match="simple key"):
+            job_yaml(contract)
+        return
+
+    text = job_yaml(contract)
+    assert yaml.safe_load(text) == job_resource(contract)
+    assert load_job_yaml(text) == job_resource(contract)
+
+
+def test_the_conflict_message_names_the_field_that_differs() -> None:
+    # It used to interpolate `already.name`, so the common case -- same table, one field
+    # edited -- read "is already bound to table 'incidents'" and sounded like a no-op.
+    declare(_named("same_name", "conflict@1"))
+
+    with pytest.raises(ContractError, match="differs in staging"):
+        declare(_named("same_name", "conflict@1", staging="other.staging.same_name"))
+
+
+def test_the_registry_is_isolated_between_unit_tests() -> None:
+    """What `tests/unit/conftest.py` buys, asserted rather than assumed.
+
+    `test_one_contract_id_may_not_answer_two_different_tables` above binds `shared@1`.
+    Without the autouse fixture it is still bound here -- measured, `register("shared@1")`
+    answered `first_table` for the rest of the session.
+    """
+    assert contracts._REGISTRY == {}
+
+    with pytest.raises(ContractError, match="unknown contract"):
+        register("shared@1")
