@@ -338,6 +338,42 @@ def test_no_refusal_runs_the_repr_of_a_caller_supplied_object() -> None:
     assert ran == []
 
 
+def test_a_metaclass_cannot_reach_the_refusal_through_the_type_name_either() -> None:
+    """The same defect one level up, and the reason `_describe` names types the long way.
+
+    `type(value).__name__` looks like a plain attribute read and is not: a metaclass may
+    define `__name__` as a property. Measured on the version that used it -- the property
+    ran while a refusal was being formatted, and one that raises replaced ContractError
+    with the caller's RuntimeError.
+    """
+    ran: list[str] = []
+
+    class RecordingMeta(type):
+        @property
+        def __name__(cls) -> str:  # noqa: N805 -- a metaclass property takes the class
+            ran.append("name")
+            return "Innocent"
+
+    class Recorded(metaclass=RecordingMeta):
+        pass
+
+    class ExplodingMeta(type):
+        @property
+        def __name__(cls) -> str:  # noqa: N805
+            raise RuntimeError("the caller's metaclass exploded")
+
+    class Exploded(metaclass=ExplodingMeta):
+        pass
+
+    with pytest.raises(ContractError, match="not a .name, callable. pair"):
+        quality_rules(Recorded())
+
+    with pytest.raises(ContractError, match="not a .name, callable. pair"):
+        quality_rules(Exploded())
+
+    assert ran == []
+
+
 def test_a_repr_that_raises_does_not_replace_the_refusal_with_the_callers_exception() -> None:
     # A guard that raises the caller's exception instead of ContractError is a guard that
     # did not guard: a caller writing `except ContractError` never sees the refusal.

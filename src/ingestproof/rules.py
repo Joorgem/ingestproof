@@ -62,14 +62,20 @@ def _as_pair(value: object) -> tuple[object, ...]:
 
 
 def _describe(value: object) -> str:
-    """Name a value in a refusal WITHOUT running that value's own `__repr__`.
+    """Name a value in a refusal without running code the caller wrote.
 
-    An exact `str` is safe to `repr`, because the slot reached is `str`'s. Anything else
-    is named by its type, which does not run the value's code.
+    An exact `str` is safe to `repr`, because the slot reached is `str`'s own.
+
+    Everything else is named by its type -- through `type`'s OWN `__name__` descriptor
+    rather than through `type(value).__name__`, because a METACLASS may define `__name__`
+    as a property. Measured: such a property ran during a refusal, and one that raises
+    replaced `ContractError` with the caller's `RuntimeError`. That is the same
+    guard-that-does-not-guard the `!r` interpolations caused, one level up the type
+    hierarchy, and it is why "does not run its `__repr__`" was too narrow a promise.
     """
     if type(value) is str:
         return repr(value)
-    return "<" + type(value).__name__ + ">"
+    return "<" + cast("str", type.__dict__["__name__"].__get__(type(value))) + ">"
 
 
 def quality_rules(*declared: object) -> tuple[Rule, ...]:
