@@ -13,6 +13,49 @@ decide when an item is closed — see the closing rule at the bottom.
 | 4 | Fail-closed promotion and `_batch_id` quarantine, generalised. | `req~ac-09~1` covered |
 | 5 | The job-YAML emitter: one declaration in, a bundle resource out. | `req~ac-01~1` acceptance test asserts a YAML round trip |
 
+## P2 — the fidelity check
+
+Layer 2 of `docs/design.md` section 5. The differential and the resynchronisation are
+**human or adjudicated** by section 15, so they are not in this queue: the loop gets the
+declared dialect and the report, and the two items marked `human` below are here so the
+phase reads whole, not so a turn takes them.
+
+| # | task | who | closes when |
+|---|---|---|---|
+| 1 | A `Dialect`: encoding, delimiter, quotechar, escape policy, record separator, empty semantics. No field has a default, and nothing infers one. `require_dialect` refuses a missing one with a message that says why. | loop | `req~ac-04~1` covered and its acceptance test green |
+| 2 | `parse_records(source, dialect)`: bytes and a declared dialect in, records out. A wrongly declared dialect is OBEYED, never corrected. | loop | `req~ac-04~1` acceptance test's wrong-dialect case green |
+| 3 | `Damage(record_index, field_index, expected, actual)` and `locate(expected, actual)` over two ALIGNED record streams, ordered by record then field. It carries no line number and no byte position. | loop | `req~ac-03~1` covered and its acceptance test green |
+| 4 | `locate` refuses streams of different lengths rather than zipping them, naming resynchronisation as what has to happen first. | loop | `req~ac-03~1` acceptance test's `Misaligned` case green |
+| 5 | `Report`: the damages plus `records_compared`, so a count is never published as a rate. | loop | `req~ac-03~1` acceptance test asserts the denominator |
+| 6 | The differential: run the reference parse against a landed reading and produce a `Report`. | **human** | `req~ac-02a~1` covered and its acceptance test green |
+| 7 | Resynchronisation: after a divergence, re-anchor on K byte-identical records and report a bounded damage span. | **human** | `req~ac-02a~1` acceptance test's multiline case green |
+
+### Why items 6 and 7 are not the loop's
+
+`docs/design.md` section 15 assigns the differential and the resynchronisation to a human
+or to adjudication. Section 5 says why for item 7: a positional comparison after one
+embedded record separator reports about 500 divergences for one damage, and choosing the
+re-anchor width K and the span boundary is a judgement no frozen test captures well.
+
+Item 3 is the loop's because `locate` over ALIGNED streams is the report's locating step
+rather than the differential: the differential is running two parsers, and the resync is
+what to do when they disagree on length. If that reading is wrong, items 3 to 5 move.
+
+### What P0 owed this phase and did not leave
+
+The three acceptance files below did not exist when P1 closed, so no P2 item could have
+closed even with the code written. They are drafted at
+`scratchpad/p2/` and are a human's commit, because `tests/acceptance/**` is frozen:
+
+- `tests/acceptance/test_ac04_dialect_is_declared_never_inferred.py`
+- `tests/acceptance/test_ac03_damage_is_located_by_record_and_field.py`
+- `tests/acceptance/test_ac02a_the_differential_detects_the_three_incidents.py`
+
+Measured on the drafts: **23 xfailed** under `uv run pytest`, and **23 failed** under
+`--runxfail`. Same conditional strict `xfail` as P1's three, conditioned on
+`ingestproof.dialect`, `ingestproof.report` and `ingestproof.differential` respectively, so
+each marker evaporates on its own when the module lands.
+
 ## Closing rule
 
 An item closes when **both** hold, and neither is something a turn can write:

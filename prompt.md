@@ -133,8 +133,12 @@ your own judge.
 ## The rules that are not obvious
 
 - **Never edit the body or the name of a property test in the same commit that changes
-  `src/**`.** The Hypothesis seed is a hash of the test's cleaned source, so renaming one
+  `src/**`.** The Hypothesis SEED is a hash of the test's cleaned source, so renaming one
   re-draws its entire corpus: a green turns red with nothing in production having moved.
+  The separation buys attribution, and it does not buy all of it — measured, Hypothesis
+  also harvests string constants out of imported local modules, so editing `src/**` ALONE
+  re-draws a corpus too. Put the `src` commit FIRST, with the property file provably
+  untouched, so a re-draw surfaces where it can be attributed.
   Adding `@example(...)` is safe — `_clean_source` strips decorators.
 - **A property failed?** The whole turn is: pin the counterexample as `@example(...)` in
   `tests/property/**`, fix the code, commit. Nothing else.

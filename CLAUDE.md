@@ -24,8 +24,17 @@ Markers deselect the outer rings by default (`-m 'not external and not nightly'`
 ## Hypothesis
 
 The `ci` profile is the default: `derandomize=True`, `database=None`, 200 examples. The
-seed is then a hash of the test's cleaned source, so the same code always draws the same
-corpus — and renaming or editing a property test re-draws it.
+SEED is then a hash of the test's cleaned source — and renaming or editing a property
+test re-draws its corpus.
+
+**The seed is not the whole corpus.** Measured on 6.165.10: Hypothesis also harvests
+string constants out of the local modules a session has imported and injects them into
+strategies, so the same test at the same seed draws differently depending on the import
+scope. One property's 200 examples fingerprint `ec1acdc1` alone and `9b8b2013` with
+`ingestproof.rules` imported first. Two consequences, both bitten: **measure a mutant in
+the ring CI actually runs**, never per-file — a mutant a property killed alone survived it
+under `uv run pytest`; and a property drawing only `sampled_from` over fixed values is
+immune to this, so the warning is about the strategies rather than about the profile.
 
 **`HYPOTHESIS_PROFILE=dev` cannot pass this suite.** `dev` sets `derandomize=False`, and
 `tests/unit/test_manifest.py` asserts `settings.default.derandomize is True`. Arguably

@@ -34,11 +34,13 @@ jobs:
       - uses: astral-sh/setup-uv@v10.0.1
         with: { python-version: "3.12" }
       - run: uv sync --all-groups
-      # P0 REPORTS, it does not gate: `src/` is one __version__ line, so every criterion is
-      # legitimately uncovered and a gate here would only be a red light nobody can fix.
-      # P1 removes `continue-on-error` in the same turn that lands the first `[impl->...]` tag.
+      # It GATES from P1 onward. Under P0 `src/` was one __version__ line, every criterion
+      # was legitimately uncovered, and a gate here would have been a red light nobody could
+      # fix -- so this step carried `continue-on-error: true` until the first `[impl->...]`
+      # tag landed. It landed in PR #4 (`src/ingestproof/contracts.py`), and by the close of
+      # P1 the report carries 19 `not ok [` lines against 22 criteria, with ac-01, ac-07 and
+      # ac-09 absent from it. A criterion that goes back to uncovered is now a red night.
       - name: Trace
-        continue-on-error: true
         run: uv run python -m tools.oft
       # This one BLOCKS, and deliberately so. tools/spec_parse is narrower than OFT, so an
       # item in any other OFT-legal form is visible to the JAR and invisible to the inner
