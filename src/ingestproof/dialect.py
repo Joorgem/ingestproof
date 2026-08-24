@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import codecs
 from dataclasses import dataclass, fields
+from typing import cast
 
 from ingestproof.contracts import type_name
 
@@ -77,9 +78,28 @@ class Dialect:
     empty: str
 
     def __post_init__(self) -> None:
+        # ONE GATE AT THE TOP, and everything after it operates on a real `str`.
+        # `codecs.lookup`, `len`, `==` and `in` all dispatch to code the CALLER wrote, and
+        # measured on the version without this: a `str` subclass whose `__len__` or
+        # `__eq__` raises replaced DialectError with the caller's own exception, and one
+        # whose `__repr__` records ran inside the refusal message. That is the fourth time
+        # this repository has met this class -- `rules._describe`, `contracts.type_name`,
+        # `promotion._judge` -- and the answer each time is to stop asking the object.
+        #
+        # `type(value) is str` and not `isinstance`: a subclass IS the attack, and
+        # `isinstance` consults `__class__`, which can be a property.
+        for name in FIELD_NAMES:
+            value = getattr(self, name)
+            if type(value) is not str:
+                raise DialectError(
+                    f"{name} must be a plain str, not a {type_name(value)}: a subclass can "
+                    "answer len, equality and repr with code of its own, and this layer "
+                    "refuses at declaration rather than inside a batch"
+                )
+
         try:
             codec = codecs.lookup(self.encoding)
-        except (LookupError, TypeError) as error:
+        except LookupError as error:
             raise DialectError(
                 f"no codec for the declared encoding {self.encoding!r}"
             ) from error
@@ -96,7 +116,7 @@ class Dialect:
 
         for name in ("delimiter", "quotechar"):
             value = getattr(self, name)
-            if not isinstance(value, str) or len(value) != 1:
+            if len(value) != 1:
                 raise DialectError(f"{name} must be exactly one character, not {value!r}")
 
         if self.delimiter == self.quotechar:
@@ -132,19 +152,33 @@ def require_dialect(dialect: object) -> Dialect:
     reason is the thesis -- a guessed dialect makes the proof circular, because the guess
     comes from the bytes the proof is about.
     """
-    if not dialect:
+    # THE TYPE FIRST, and by `type(...)` rather than by `isinstance`, which consults
+    # `__class__`. Truth-testing came first here and ran the caller's `__bool__` --
+    # measured, an object whose `__bool__` raises escaped as its own exception, so a
+    # caller writing `except DialectError` saw nothing at all.
+    if issubclass(type(dialect), Dialect):
+        # `cast` rather than `# type: ignore`: the line above PROVES the type, by a route
+        # mypy cannot follow, and a cast says which type was proved.
+        return cast("Dialect", dialect)
+
+    # Only an EXACT builtin is truth-tested, so "you gave me nothing" stays distinguishable
+    # from "you gave me the wrong thing" without asking an arbitrary object anything.
+    if dialect is None or (
+        type(dialect) in (dict, str, int, bool, list, tuple, set, frozenset) and not dialect
+    ):
         raise DialectError(
             "no source dialect was declared. Declare one: this library will never infer a "
             "dialect from the bytes it is about to check, because a guess made from those "
             "bytes cannot then be evidence about them"
         )
-    if not isinstance(dialect, Dialect):
-        raise DialectError(
-            f"the declared dialect is a {type_name(dialect)} and not a Dialect. Declare "
-            "one rather than a mapping: a mapping has no required fields, so it can infer "
-            "by omission"
-        )
-    return dialect
+
+    raise DialectError(
+        f"the declared dialect is a {type_name(dialect)} and not a Dialect. Declare "
+        "one rather than a mapping: a mapping has no required fields, so it can infer "
+        "by omission"
+    )
+
+
 
 
 def parse_records(source: bytes, dialect: object) -> tuple[tuple[str | None, ...], ...]:

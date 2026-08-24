@@ -87,9 +87,8 @@ def test_an_encoding_python_has_no_codec_for_is_refused_where_it_is_declared() -
         ("delimiter", ""),
         ("quotechar", "''"),
         ("quotechar", ""),
-        ("delimiter", 7),
     ),
-    ids=("two-delimiters", "no-delimiter", "two-quotes", "no-quote", "not-a-string"),
+    ids=("two-delimiters", "no-delimiter", "two-quotes", "no-quote"),
 )
 def test_a_delimiter_or_quotechar_that_is_not_one_character_is_refused(
     field: str, value: object
@@ -114,12 +113,11 @@ def test_a_delimiter_that_occurs_in_the_record_separator_is_refused() -> None:
     ("field", "value"),
     (
         ("escape", "backslashes"),
-        ("escape", None),
         ("record_separator", "\n\n"),
         ("record_separator", "|"),
         ("empty", "null-string"),
     ),
-    ids=("escape-typo", "escape-none", "double-newline", "pipe-separator", "empty-typo"),
+    ids=("escape-typo", "double-newline", "pipe-separator", "empty-typo"),
 )
 def test_a_policy_this_reader_cannot_honour_is_refused_at_declaration(
     field: str, value: object
@@ -198,6 +196,79 @@ def test_a_declared_dialect_comes_back_as_the_same_object() -> None:
     declared = _dialect()
 
     assert require_dialect(declared) is declared
+
+
+# --- no refusal path asks a caller-supplied object anything ------------------------------
+#
+# The FOURTH time this repository has met this class: `rules._describe` and its `!r`,
+# `contracts.type_name` and the metaclass `__name__`, `promotion._judge` and the exception
+# type it was formatting -- and now this module, which I wrote after all three.
+
+
+class _BoolBomb:
+    def __bool__(self) -> bool:
+        raise RuntimeError("the caller's __bool__")
+
+
+class _LenBomb(str):
+    def __len__(self) -> int:
+        raise RuntimeError("the caller's __len__")
+
+
+class _EqBomb(str):
+    def __eq__(self, other: object) -> bool:
+        raise RuntimeError("the caller's __eq__")
+
+    def __hash__(self) -> int:
+        return str.__hash__(self)
+
+
+def test_a_bool_that_raises_does_not_escape_require_dialect() -> None:
+    # It used to truth-test BEFORE checking the type, so the caller's `__bool__` ran first
+    # and a caller writing `except DialectError` saw a RuntimeError instead. The type is
+    # checked first now, by `type(...)` rather than `isinstance`, which consults
+    # `__class__` and can itself be a property.
+    with pytest.raises(DialectError, match="not a Dialect"):
+        require_dialect(_BoolBomb())
+
+
+@pytest.mark.parametrize(
+    "field", ("encoding", "delimiter", "quotechar", "escape", "record_separator", "empty")
+)
+def test_a_str_subclass_in_any_field_is_refused_before_anything_asks_it_anything(
+    field: str,
+) -> None:
+    """One gate at the top, so `codecs.lookup`, `len`, `==` and `in` all see a real str.
+
+    Measured on the version without it: a subclass whose `__len__` or `__eq__` raises
+    replaced DialectError with the caller's own exception. `type(value) is str` rather
+    than `isinstance`, because the subclass IS the attack.
+    """
+    for bomb in (_LenBomb(RFC4180[field]), _EqBomb(RFC4180[field])):
+        with pytest.raises(DialectError, match="must be a plain str"):
+            _dialect(**{field: bomb})
+
+
+def test_no_field_refusal_runs_the_repr_of_a_caller_supplied_value() -> None:
+    ran: list[str] = []
+
+    class Recording(str):
+        def __repr__(self) -> str:
+            ran.append("repr")
+            return "<recording>"
+
+    with pytest.raises(DialectError, match="must be a plain str"):
+        _dialect(delimiter=Recording(",,"))
+
+    assert ran == []
+
+
+def test_a_non_string_field_is_refused_by_the_type_gate_and_not_by_a_later_check() -> None:
+    # `delimiter=7` and `escape=None` used to reach the length and membership checks.
+    # They are type refusals now, which is the earlier and cheaper truth.
+    for field, value in (("delimiter", 7), ("escape", None), ("encoding", b"utf-8")):
+        with pytest.raises(DialectError, match="must be a plain str"):
+            _dialect(**{field: value})
 
 
 # --- the reader --------------------------------------------------------------------------
