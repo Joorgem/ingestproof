@@ -12,7 +12,7 @@ because this file is regenerated: anything added to it by hand is erased by the 
 render, which is when nobody is watching.
 
 Turns: **17**
-Chain tip: `10486867a41c83d1c71df3d98579cd0bba2a1cc01ecc219053559a55b1afd16a`
+Chain tip: `f2611aded6ce8b8449fe57beb9de886ae51e050f476b382682c1fd7807cd103c`
 
 Rows that correct an earlier row are in the chain but not in these counts. They
 are not turns, and counting them would grow the number of turns every time a
