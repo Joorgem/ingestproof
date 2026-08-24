@@ -31,11 +31,14 @@ from ingestproof.contracts import (
     load_job_yaml,
 )
 
-# Everything a one-line YAML scalar can hold. `Cc` is the control characters, which
-# `_quote` refuses outright because a newline inside a single-quoted scalar folds into a
-# space and would round trip through a DIFFERENT string; `Cs` is the surrogates, which are
-# not encodable and would fail before any of this.
-SCALAR = st.text(st.characters(exclude_categories=("Cc", "Cs")), max_size=24)
+# Everything a one-line YAML scalar can hold, which is everything `_quote` does not
+# refuse. `Cc` is the control characters -- a newline inside a single-quoted scalar folds
+# into a space and would round trip through a DIFFERENT string. `Zl` and `Zp` are U+2028
+# and U+2029, which YAML 1.1 section 4.1 lists as line breaks; PyYAML 6 does NOT treat
+# them as such, measured, so they are excluded here for the parser that reads a bundle
+# rather than for the one refereeing below. `Cs` is the surrogates, which are not
+# encodable and would fail before any of this.
+SCALAR = st.text(st.characters(exclude_categories=("Cc", "Cs", "Zl", "Zp")), max_size=24)
 
 
 @given(
