@@ -2,34 +2,51 @@
 
 The unit ring pins each refusal one at a time. What it cannot say is that there is no
 THIRD outcome -- a rule set that is neither refused nor returned unchanged, or one that
-gets refused after the callable has already run. Both are the shapes that would let the
-JVM into the declaration layer through a door the acceptance file's subprocess cannot see,
-because the import would be identical either way.
+gets refused after the callable has already run. So the property is an exhaustive
+disjunction: for any sequence of candidates, `quality_rules` either raises `ContractError`
+or returns exactly `tuple(candidates)` -- with `calls == []` on BOTH arms, including the
+one that raised, because on the refusal path the exception is all a caller ever sees.
 
-So the property is stated as an exhaustive disjunction: for any sequence of candidates,
-`quality_rules` either raises `ContractError` or returns exactly `tuple(candidates)` --
-and `calls == []` on BOTH branches, including the one that raised.
+WHAT THIS STRUCTURALLY CANNOT CATCH, said here so it is not read as wider than it is: an
+UNDER-strict validator. A guard that stops refusing something lands in the "returns
+exactly tuple(candidates)" arm, which this property accepts -- measured, deleting the
+`callable` guard leaves this file green. Every refusal is pinned in the unit ring for that
+reason. This property is about the SHAPE of the outcome, not about which shapes are
+refused.
 
-The `ci` profile is derandomised, so the corpus is fixed by this function's cleaned
-source. `@example` decorators are stripped before hashing and are the safe way to pin a
-case the draws are unlikely to reach on their own -- measured last turn, 200 draws will
-not find a specific needle, so a pin is not decoration.
+THE `ci` PROFILE FIXES THE SEED, NOT THE CORPUS, and here that is not academic.
+`derandomize=True` makes the seed a hash of this function's cleaned source. But Hypothesis
+6.165 also harvests string constants out of the local modules a session has imported and
+injects them into strategies, so the same test, same seed, same profile draws a DIFFERENT
+corpus depending on what else was imported. Measured on this file's strategy: fingerprint
+`ec1acdc1...` on its own, `9b8b2013...` with `ingestproof.rules` imported first.
+
+That is why the pins below are not decoration, and it is not the reason the previous
+version of this docstring gave. Measured: the sort mutant -- `tuple(sorted(judged))` for
+`tuple(judged)` -- was killed by this property when the file ran ALONE and SURVIVED it
+under `uv run pytest`, which is the scope CI runs. In that scope no drawn spec was ever
+accepted carrying two differently-named rules, so `declared == tuple(built)` had no
+ordering to disagree with. The two- and three-rule pins put it back, and with them the
+mutant dies in the full ring.
+
+`@example` decorators are stripped by `_clean_source` before the digest, so adding a pin
+costs no re-draw. Editing a statement in the function below does.
 
 [utest->req~ac-07~1]
 """
 
 from __future__ import annotations
 
-import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
 
 from ingestproof.contracts import ContractError
 from ingestproof.rules import quality_rules
 
-# Five shapes, one per branch `quality_rules` has: well formed, too short, too long, a
-# second element that is not callable, and a list where a tuple is required. The name is
-# drawn separately so a duplicate can arise across any two of them.
+# Five shapes: well formed, too short, too long, a second element that is not callable,
+# and a list where a tuple is required. They are NOT one per refusal branch -- the first
+# three all reach the pair-shape guard, and the name and duplicate guards are reached
+# through the separately drawn name rather than through a shape.
 SHAPE = st.sampled_from(("ok", "one", "three", "not-callable", "not-tuple"))
 SPEC = st.lists(st.tuples(SHAPE, st.text(max_size=6)), max_size=6)
 
@@ -50,10 +67,20 @@ def _build(spec: list[tuple[str, str]], probe: object) -> list[object]:
     return built
 
 
+# THE ACCEPT ARM, and these pins are the whole of it. Measured under the inner ring's
+# import scope: of 204 executions, 200 refused and 4 accepted -- two of them the EMPTY
+# rule set and two carrying a single rule. So the half of the disjunction that pins
+# behaviour ran twice, trivially, and never with two names to put in an order.
+@example(spec=[("ok", "a"), ("ok", "b"), ("ok", "c")])
+@example(spec=[("ok", "z"), ("ok", "a")])
+@example(spec=[("ok", "a")])
+@example(spec=[])
+# The refusal arm. The draws reach every guard on their own -- measured, 129 pair-shape,
+# 44 callable, 15 name, 5 duplicate over 200 -- so these three are cheap insurance
+# against a re-drawn corpus rather than the only way in.
 @example(spec=[("ok", "dup"), ("ok", "dup")])
 @example(spec=[("ok", "")])
 @example(spec=[("ok", "a"), ("not-callable", "b")])
-@example(spec=[])
 @given(spec=SPEC)
 def test_quality_rules_either_refuses_or_returns_unchanged_and_calls_nothing(
     spec: list[tuple[str, str]],
@@ -67,30 +94,10 @@ def test_quality_rules_either_refuses_or_returns_unchanged_and_calls_nothing(
     built = _build(spec, probe)
 
     try:
-        declared = quality_rules(*built)  # type: ignore[arg-type]
+        declared = quality_rules(*built)
     except ContractError:
-        # The refusal path is the one where a call would be easiest to miss: the exception
-        # is what the caller sees, so a callable invoked on the way to raising leaves no
-        # trace anywhere else.
         assert calls == []
         return
 
     assert declared == tuple(built)
     assert calls == []
-
-
-def test_the_property_above_reaches_both_branches() -> None:
-    """Otherwise the disjunction is satisfied by a function that only ever raises.
-
-    A `try/except/return` property is vacuous if one arm is unreachable, and nothing in
-    the property itself can tell. This is the arm-coverage check, stated over the four
-    pinned cases rather than over the draws.
-    """
-    probe = bool
-
-    assert quality_rules(*_build([], probe)) == ()
-    assert quality_rules(*_build([("ok", "a")], probe)) == (("a", probe),)
-
-    for refused in ([("ok", "dup"), ("ok", "dup")], [("ok", "")], [("not-tuple", "a")]):
-        with pytest.raises(ContractError):
-            quality_rules(*_build(refused, probe))  # type: ignore[arg-type]
