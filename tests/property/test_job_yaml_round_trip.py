@@ -1,17 +1,18 @@
 """The job-resource round trip, over declarations nobody wrote by hand.
 
 The acceptance test round trips ONE declaration through two parsers. This file does it
-over arbitrary ones, which is where the quoting rule is actually exercised: `on`, a date,
-an apostrophe and a colon are all things a table name may contain and none of them appear
-in a fixture anyone would think to write.
+over arbitrary ones, which puts the quoting rule against inputs no fixture enumerates.
 
 Two parsers here as well, and for the same reason. `load_job_yaml(job_yaml(c)) ==
 job_resource(c)` alone is green for an emitter and a reader that share one misconception;
 PyYAML is the referee that does not share it.
 
-The `ci` Hypothesis profile is derandomised and the seed is a hash of this test's cleaned
-source, so editing the body below re-draws its whole corpus. `@example` decorators are
-stripped before hashing and are the safe way to pin a counterexample.
+The `ci` Hypothesis profile is derandomised, so a test function's corpus is fixed by its
+own source: `function_digest` hashes `_clean_source(inspect.getsource(fn))`. Measured on
+hypothesis 6.165.10 -- adding a comment, a blank line or an `@example(...)` decorator
+leaves the digest unchanged, and changing a statement or the function's name changes it.
+A module-level strategy is NOT in that digest, but editing one still re-draws the corpus,
+because the alphabet the draws come from is different.
 
 [utest->req~ac-01~1]
 """
@@ -31,14 +32,18 @@ from ingestproof.contracts import (
     load_job_yaml,
 )
 
-# Everything a one-line YAML scalar can hold, which is everything `_quote` does not
-# refuse. `Cc` is the control characters -- a newline inside a single-quoted scalar folds
-# into a space and would round trip through a DIFFERENT string. `Zl` and `Zp` are U+2028
-# and U+2029, which YAML 1.1 section 4.1 lists as line breaks; PyYAML 6 does NOT treat
-# them as such, measured, so they are excluded here for the parser that reads a bundle
-# rather than for the one refereeing below. `Cs` is the surrogates, which are not
-# encodable and would fail before any of this.
-SCALAR = st.text(st.characters(exclude_categories=("Cc", "Cs", "Zl", "Zp")), max_size=24)
+# What `_quote` accepts, so that the round trip below is a round trip and not a refusal.
+# `Cc` is the control characters -- a newline inside a single-quoted scalar folds into a
+# space and would round trip through a DIFFERENT string. `Zl` and `Zp` are U+2028 and
+# U+2029, which YAML 1.1 lists as line breaks; PyYAML 6 does NOT treat them as such,
+# measured, so they are excluded here for the parser that reads a bundle rather than for
+# the one refereeing below. `Cs` is the surrogates and U+FFFE/U+FFFF are non-characters:
+# both sit outside YAML's printable set, and PyYAML's reader refuses a document carrying
+# either -- measured, and not a claim about encoding, since nothing here encodes anything.
+SCALAR = st.text(
+    st.characters(exclude_categories=("Cc", "Cs", "Zl", "Zp"), exclude_characters="\ufffe\uffff"),
+    max_size=24,
+)
 
 
 @given(
