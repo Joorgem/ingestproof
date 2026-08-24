@@ -36,6 +36,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass, fields
+from typing import cast
 
 # The job parameter's default, and its whole job is to fail. A job parameter has to have
 # SOME default and no batch id is a valid one, so a default that happened to be a real
@@ -140,6 +141,20 @@ class TablePlan:
 # leak between callers in one process, which for the test ring is handled by the autouse
 # fixture in `tests/unit/conftest.py`.
 _REGISTRY: dict[str, TableContract] = {}
+
+
+def type_name(value: object) -> str:
+    """The name of a value's type, without running code the caller wrote.
+
+    `type(value).__name__` looks like a plain attribute read and is not: a METACLASS may
+    define `__name__` as a property. Measured twice, in two modules -- such a property ran
+    while a message was being formatted and returned a name of its choosing, and one that
+    RAISES escaped the function that was formatting it. In `rules` that turned a
+    `ContractError` into the caller's exception; in `promotion` it broke fail-closed
+    outright, because the name being read was the type of the exception a rule had just
+    raised. `type`'s own descriptor is what both need, so it lives here rather than twice.
+    """
+    return cast("str", type.__dict__["__name__"].__get__(type(value)))
 
 
 def require_batch_id(batch_id: str) -> str:

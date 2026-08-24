@@ -34,22 +34,52 @@ def test_the_batch_id_sentinel_the_job_resource_ships_is_refused_here() -> None:
 
 
 def test_a_malformed_rule_set_is_refused_before_any_record_is_read() -> None:
-    """`quality_rules` is called, rather than the rules being trusted.
+    """`quality_rules` is called, and it is called BEFORE the records are walked.
 
-    A malformed rule reaching evaluation would be discovered as a batch failure. The whole
-    posture of the declaration layer is that it is discovered at declaration.
+    Both halves are asserted through the ORDER of a shared log rather than through a probe
+    on the record. An earlier version watched only `dict.__getitem__` and passed against an
+    implementation that read every record before validating anything -- measured, and
+    unsurprising once counted: `.get`, `dict(record)`, `{**record}`, `.items`, `.values`,
+    `.keys`, `len`, `in`, `.copy`, `json.dumps`, `==` and `.pop` all return a record's
+    contents without going through `__getitem__`.
+
+    The fixture also needs a rule that WOULD read a record. With only an uncallable rule,
+    `read == []` holds whether the validation ran first or last.
     """
-    read: list[object] = []
+    order: list[str] = []
 
     class Watching(dict[str, object]):
-        def __getitem__(self, key: str) -> object:
-            read.append(key)
-            return super().__getitem__(key)
+        def __iter__(self) -> object:
+            order.append("batch walked")
+            return super().__iter__()
+
+    def reads(record: object) -> bool:
+        order.append("record read")
+        return True
 
     with pytest.raises(ContractError, match="is not callable"):
-        partition_batch([Watching(id="1")], [("bad", "not callable")], batch_id=BATCH)
+        partition_batch(
+            Watching(one={"id": "1"}), [("reads", reads), ("bad", "not callable")], batch_id=BATCH
+        )
 
-    assert read == []
+    assert order == []
+
+
+def test_the_batch_id_is_judged_before_the_rules_container_is_even_read() -> None:
+    # `require_batch_id` is two comparisons on a local and runs no caller code; iterating
+    # the rules container runs the caller's `__iter__`. Measured on the previous order: a
+    # batch id this call was about to refuse still got the rules container iterated first.
+    order: list[str] = []
+
+    class Noisy(list[object]):
+        def __iter__(self) -> object:
+            order.append("rules read")
+            return super().__iter__()
+
+    with pytest.raises(ContractError, match="empty"):
+        partition_batch([], Noisy([("r", bool)]), batch_id="")
+
+    assert order == []
 
 
 # --- the partition ------------------------------------------------------------------------
@@ -209,6 +239,107 @@ def test_a_later_rule_is_not_evaluated_once_an_earlier_one_stopped_the_record() 
     partition_batch([{"id": "1"}], [watch("first", False), watch("second", True)], batch_id=BATCH)
 
     assert evaluated == ["first"]
+
+
+# --- the containers, which are the caller's and are read exactly once --------------------
+
+
+def test_a_rule_that_edits_the_batch_it_is_being_judged_against_cannot_lose_a_record() -> None:
+    """Totality is structural, not a promise about how the caller behaves.
+
+    Measured before the snapshot: a rule deleting from the list it was being judged
+    against left four records in and three in the comparison target -- one record on
+    NEITHER side. That is "the parse dropped it", which is the single failure this module
+    exists to make impossible, arriving through the module itself.
+    """
+    records = [{"id": "1"}, {"id": "2"}, {"id": "3"}, {"id": "4"}]
+
+    def edits(record: dict[str, str]) -> bool:
+        if record["id"] == "1":
+            del records[1]
+        return True
+
+    batch = partition_batch(records, [("edits", edits)], batch_id=BATCH)
+
+    assert [record["id"] for record in comparison_target(batch)] == ["1", "2", "3", "4"]
+
+
+def test_a_rule_that_grows_the_batch_it_is_being_judged_against_still_terminates() -> None:
+    # Measured before the snapshot: this never returned, and the list had passed seven
+    # million entries. A hang is not a fail-closed outcome.
+    records: list[dict[str, str]] = [{"id": "1"}]
+
+    def grows(record: dict[str, str]) -> bool:
+        records.append({"id": "grown"})
+        return True
+
+    batch = partition_batch(records, [("grows", grows)], batch_id=BATCH)
+
+    assert len(comparison_target(batch)) == 1
+
+
+def test_a_generator_of_records_is_read_once_and_works() -> None:
+    # It works today by accident of the snapshot rather than by the `Sequence` annotation,
+    # and the snapshot is what makes it safe to say so.
+    batch = partition_batch(({"id": str(n)} for n in range(3)), [PASSES], batch_id=BATCH)  # type: ignore[arg-type]
+
+    assert [record["id"] for record in batch.promote] == ["0", "1", "2"]
+
+
+@pytest.mark.parametrize(
+    ("container", "message"),
+    ((None, "not iterable"), (42, "not iterable")),
+    ids=("none", "int"),
+)
+def test_a_rules_container_that_is_not_iterable_is_refused_rather_than_escaping(
+    container: object, message: str
+) -> None:
+    # Measured before the guard: `rules=None` escaped as TypeError, so a caller writing
+    # `except ContractError` saw nothing at all.
+    with pytest.raises(ContractError, match=message):
+        partition_batch([{"id": "1"}], container, batch_id=BATCH)  # type: ignore[arg-type]
+
+
+def test_a_rules_container_whose_iteration_raises_is_refused_rather_than_escaping() -> None:
+    class Unreadable(list[object]):
+        def __iter__(self) -> object:
+            raise RuntimeError("the caller's container cannot be read")
+
+    with pytest.raises(ContractError, match="could not be read"):
+        partition_batch([{"id": "1"}], Unreadable([PASSES]), batch_id=BATCH)
+
+
+def test_an_exception_whose_type_name_is_a_hostile_metaclass_property_still_quarantines() -> None:
+    """The third place this repository has met the same read, and the one that mattered most.
+
+    `Rejection.error` used to be `type(error).__name__`, and a metaclass may define
+    `__name__` as a property. Measured: a rule raising such an exception escaped
+    `partition_batch` entirely -- so the caller got the metaclass's RuntimeError instead of
+    a quarantined record, and fail-closed, which IS the criterion, was broken through the
+    formatting of the reason rather than through the judgement.
+
+    `contracts.type_name` reaches `type`'s own descriptor, and lives in `contracts` rather
+    than in two modules because this is now its third occurrence.
+    """
+
+    class HostileMeta(type):
+        @property
+        def __name__(cls) -> str:  # noqa: N805
+            raise RuntimeError("the caller's metaclass exploded")
+
+    class HostileError(Exception, metaclass=HostileMeta):
+        pass
+
+    def raises_hostile(record: object) -> object:
+        raise HostileError
+
+    record = {"id": "1"}
+    batch = partition_batch([record], [("hostile", raises_hostile)], batch_id=BATCH)
+
+    assert batch.promote == ()
+    assert batch.rejections == (
+        Rejection(record=record, rule="hostile", error="HostileError"),
+    )
 
 
 def test_the_type_of_the_batch_is_what_comparison_target_expects() -> None:
