@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import pytest
 import yaml
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 from ingestproof.contracts import (
@@ -71,6 +71,57 @@ def test_any_declaration_round_trips_through_this_module_and_through_pyyaml(
 
     assert load_job_yaml(text) == resource
     assert yaml.safe_load(text) == resource
+
+
+@example(character="\ufffe")
+@example(character="\uffff")
+@example(character="\ud800")
+@example(character="\ufdd0")
+@example(character="\x85")
+@example(character="\u2028")
+@given(character=st.characters())
+def test_every_character_is_either_refused_or_agreed_on_by_pyyaml(character: str) -> None:
+    """For any character, the emitter refuses the declaration or PyYAML agrees with it.
+
+    THE PINS ARE WHAT MAKE THIS BITE, AND THE DRAWS DO NOT. Measured against the module
+    that emitted U+FFFE: with `@given` alone this test PASSED -- the `ci` profile draws
+    200 examples out of 1.1 million code points and will not find two of them. Written
+    that way it would have been a property that reads like a guarantee and holds nothing,
+    which is the shape this repository keeps finding. With the six `@example` pins it goes
+    red against that same module, on the surrogate -- Hypothesis runs pins in the reverse
+    of the order they are written, so the one that fires first is not the one listed first.
+
+    So what the `@given` half buys is not discovery; it is the frame that makes the next
+    pin a one-line addition, and `_clean_source` strips decorators, so adding one does not
+    re-draw the corpus.
+
+    The six are one per class the guard has to get right: the two non-characters and a
+    surrogate, which PyYAML's reader refuses; U+FDD0, which is also a non-character and
+    which PyYAML reads back UNCHANGED, so it is the control arm against over-refusing;
+    U+0085, which PyYAML accepts and folds; and U+2028, which PyYAML round trips and this
+    module refuses anyway for a parser that is not PyYAML.
+
+    It cannot pass vacuously by refusing everything: the round trip above is what proves
+    acceptance happens, over 200 declarations of five fields each.
+    """
+    contract = TableContract(
+        name="incidents",
+        contract_id="incidents@1",
+        staging=f"main.staging{character}incidents",
+        bronze="main.bronze.incidents",
+        quarantine="main.quarantine.incidents",
+        landing_mode="append",
+        prefix="incidents_",
+        constraints=(),
+    )
+
+    try:
+        text = job_yaml(contract)
+    except ContractError:
+        return
+
+    assert yaml.safe_load(text) == job_resource(contract)
+    assert load_job_yaml(text) == job_resource(contract)
 
 
 @given(control=st.sampled_from(["\n", "\r", "\t", "\x00", "\x7f"]))
