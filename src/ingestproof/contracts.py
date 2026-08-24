@@ -26,6 +26,7 @@ exactly that reason; this module is one of the two parsers, never both.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 
 # The job parameter's default, and its whole job is to fail. A job parameter has to have
@@ -63,6 +64,12 @@ RESERVED_PLAIN_WORDS = frozenset(
         "null", "Null", "NULL",
     }
 )
+
+# U+2028 LINE SEPARATOR and U+2029 PARAGRAPH SEPARATOR. YAML 1.1 section 4.1 lists both as
+# line breaks. PyYAML 6 does NOT -- measured, both round trip through it unchanged -- so
+# this refusal is not for the referee in the acceptance test but for the parser that reads
+# a bundle, exactly as `y` and `n` stay in RESERVED_PLAIN_WORDS above.
+YAML_LINE_SEPARATORS = ("\u2028", "\u2029")
 
 INDENT = 2
 
@@ -147,9 +154,13 @@ def declare(contract: TableContract) -> TablePlan:
         raise ContractError(
             f"contract {contract.contract_id!r} is already bound to table {already.name!r}"
         )
-    _REGISTRY[contract.contract_id] = contract
 
-    return TablePlan(
+    # THE PLAN IS BUILT BEFORE THE REGISTRY IS TOUCHED, and the order is the whole point.
+    # `job_yaml` refuses a declaration carrying a character with no one-line YAML scalar,
+    # and it refuses it HERE. Registering first left `declare` raising while `register`
+    # went on answering with the contract it had just rejected -- a refusal that refuses
+    # nothing, which is fail-open by another name.
+    plan = TablePlan(
         schema=AUDIT_SCHEMA,
         rules=contract.constraints,
         quarantine={
@@ -166,6 +177,8 @@ def declare(contract: TableContract) -> TablePlan:
         },
         job_yaml=job_yaml(contract),
     )
+    _REGISTRY[contract.contract_id] = contract
+    return plan
 
 
 def job_resource(contract: TableContract) -> dict[str, Yaml]:
@@ -218,8 +231,16 @@ def _quote(value: str) -> str:
     # A single-quoted YAML scalar is one line. A newline inside one is legal YAML and
     # FOLDS -- it comes back as a space -- so emitting a declaration that carries one
     # would round trip through a different string, silently. Refuse instead.
-    if any(ord(character) < 0x20 or ord(character) == 0x7F for character in value):
-        raise ContractError(f"control character in {value!r}: it has no one-line YAML scalar")
+    #
+    # CATEGORY `Cc`, NOT A CODE-POINT RANGE. `ord(c) < 0x20 or ord(c) == 0x7F` stood here
+    # and let the C1 block through: measured, U+0085 does not round trip through PyYAML 6
+    # and U+009F makes its reader raise. `Cc` is both blocks and nothing else.
+    if any(unicodedata.category(character) == "Cc" for character in value) or any(
+        separator in value for separator in YAML_LINE_SEPARATORS
+    ):
+        raise ContractError(
+            f"control character or line separator in {value!r}: it has no one-line YAML scalar"
+        )
     return "'" + value.replace("'", "''") + "'"
 
 
@@ -227,6 +248,20 @@ def _unquote(token: str) -> str:
     if len(token) >= 2 and token.startswith("'") and token.endswith("'"):
         return token[1:-1].replace("''", "'")
     return token
+
+
+def _scalar(token: str) -> str:
+    """A VALUE, which this module always emits quoted -- so anything else is not ours.
+
+    `_unquote` alone read `'unterminated` as the seven-plus-one characters it looks like,
+    because it only strips when both ends are quotes. That is a document this emitter
+    cannot produce and no YAML parser accepts, being read as data.
+
+    Keys are not put through this: a plainly safe key is emitted bare, on purpose.
+    """
+    if not token.startswith("'") or _closing_quote(token) != len(token) - 1:
+        raise ContractError(f"value is not one complete single-quoted scalar: {token!r}")
+    return _unquote(token)
 
 
 def _emit_key(key: str) -> str:
@@ -323,7 +358,7 @@ def _read_mapping(lines: list[str], start: int, indent: int) -> tuple[Yaml, int]
         key_token, value_token = _split_entry(lines[index].strip())
         key = _unquote(key_token)
         if value_token:
-            out[key] = _unquote(value_token)
+            out[key] = _scalar(value_token)
             index += 1
             continue
         nested = index + 1

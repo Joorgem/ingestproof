@@ -12,6 +12,7 @@ assertion on its VALUE. Without one the mutation gate is silently inert on it.
 from __future__ import annotations
 
 import datetime
+import unicodedata
 
 import pytest
 import yaml
@@ -28,6 +29,7 @@ from ingestproof.contracts import (
     RESERVED_PLAIN_WORDS,
     SENTINEL_BATCH_ID,
     TAG_PREFIX,
+    YAML_LINE_SEPARATORS,
     ContractError,
     TableContract,
     declare,
@@ -57,15 +59,16 @@ def _contract(**overrides: object) -> TableContract:
 
 
 def _named(name: str, contract_id: str, **overrides: object) -> TableContract:
-    return _contract(
-        name=name,
-        contract_id=contract_id,
-        staging=f"main.staging.{name}",
-        bronze=f"main.bronze.{name}",
-        quarantine=f"main.quarantine.{name}",
-        prefix=name + "_",
-        **overrides,
-    )
+    fields: dict[str, object] = {
+        "name": name,
+        "contract_id": contract_id,
+        "staging": f"main.staging.{name}",
+        "bronze": f"main.bronze.{name}",
+        "quarantine": f"main.quarantine.{name}",
+        "prefix": name + "_",
+    }
+    fields.update(overrides)
+    return _contract(**fields)
 
 
 # --- the module-level constants -------------------------------------------------------
@@ -85,6 +88,7 @@ def test_every_module_level_constant_holds_the_value_the_module_documents() -> N
     assert TAG_PREFIX == "ingestproof_"
     assert INDENT == 2
     assert PLAIN_KEY.pattern == r"\A[A-Za-z_][A-Za-z0-9_-]*\Z"
+    assert YAML_LINE_SEPARATORS == ("\u2028", "\u2029")
 
 
 def test_the_reserved_word_set_is_what_a_yaml_parser_may_refuse_to_call_a_string() -> None:
@@ -278,3 +282,77 @@ def test_trailing_content_below_the_document_is_refused() -> None:
 def test_the_emitter_refuses_what_has_no_round_trip(node: object, message: str) -> None:
     with pytest.raises(ContractError, match=message):
         contracts._emit(node, 0)  # type: ignore[arg-type]
+
+
+# --- what the review raised, each measured before it was fixed -------------------------
+
+UNEMITTABLE = ("\x00", "\n", "\r", "\t", "\x7f", "\x85", "\x9f", "\u2028", "\u2029")
+
+
+def test_a_declaration_declare_refused_is_not_findable_through_register() -> None:
+    """`declare` raising while `register` answers is a refusal that refuses nothing.
+
+    The registry was assigned before `job_yaml` ran, so a declaration carrying a character
+    with no one-line YAML scalar was rejected and registered in the same call. Measured on
+    the module as it stood: `declare` raised, and `register('leaky@1').name` then returned
+    'leaky'.
+    """
+    contract = _named("leaky", "leaky@1", staging="main.staging\nleaky")
+
+    with pytest.raises(ContractError, match="no one-line YAML scalar"):
+        declare(contract)
+
+    with pytest.raises(ContractError, match="unknown contract"):
+        register("leaky@1")
+
+
+@pytest.mark.parametrize("character", UNEMITTABLE, ids=[f"U+{ord(c):04X}" for c in UNEMITTABLE])
+def test_a_character_with_no_one_line_scalar_is_refused_rather_than_emitted(
+    character: str,
+) -> None:
+    contract = _named("incidents", "incidents@1", staging="main.staging" + character)
+
+    with pytest.raises(ContractError, match="no one-line YAML scalar"):
+        job_yaml(contract)
+
+
+def test_the_guard_asks_a_category_because_a_code_point_range_missed_the_c1_block() -> None:
+    """What the range let through, measured rather than argued.
+
+    `ord(c) < 0x20 or ord(c) == 0x7F` stood here and admits U+0080..U+009F. Held against
+    PyYAML 6: U+0085 comes back as a DIFFERENT string, and U+009F makes the reader raise.
+    Both are category `Cc`, which is what the guard asks for now.
+    """
+    assert unicodedata.category("\x85") == "Cc"
+    assert not (ord("\x85") < 0x20 or ord("\x85") == 0x7F)
+    assert yaml.safe_load("k: '\x85'") != {"k": "\x85"}
+
+    with pytest.raises(yaml.YAMLError):
+        yaml.safe_load("k: '\x9f'")
+
+
+def test_the_line_separators_are_refused_for_a_parser_that_is_not_the_referee() -> None:
+    """The half of that finding measurement REFUTES, kept because the reason is different.
+
+    U+2028 and U+2029 are category Zl and Zp, not Cc, and PyYAML 6 round trips both
+    unchanged -- so "they prevent the round trip" is false as measured here. YAML 1.1
+    section 4.1 does list them as line breaks and the parser that reads a bundle is not
+    PyYAML, which is the same reason `y` and `n` stay in RESERVED_PLAIN_WORDS.
+    """
+    for separator in YAML_LINE_SEPARATORS:
+        assert unicodedata.category(separator) in ("Zl", "Zp")
+        assert yaml.safe_load("k: '" + separator + "'") == {"k": separator}
+
+
+@pytest.mark.parametrize(
+    "document",
+    ("k: 'unterminated\n", "k: bare\n", "k: 'a' trailing\n"),
+    ids=("unterminated", "bare", "trailing"),
+)
+def test_a_value_this_module_could_not_have_emitted_is_refused_and_not_read(
+    document: str,
+) -> None:
+    # `_unquote` alone answered "'unterminated" for the first of these: it strips only when
+    # BOTH ends are quotes, so a half-quoted token came back as data.
+    with pytest.raises(ContractError):
+        load_job_yaml(document)
