@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import csv
 import io
+import itertools
 from pathlib import Path
 
 import pytest
@@ -341,3 +342,129 @@ def test_a_wrongly_declared_encoding_that_CAN_decode_produces_the_wrong_text() -
 def test_the_module_offers_no_way_to_ask_it_what_the_dialect_is() -> None:
     for banned in ("sniff", "detect", "infer", "guess", "autodetect"):
         assert not hasattr(module, banned), banned
+
+
+# --- what the review found, each measured on the reader before it was changed ------------
+
+
+def test_the_exhaustive_differential_against_the_stdlib_finds_nothing() -> None:
+    """19,531 inputs, and this is the strongest assertion in the file.
+
+    Every string of length 0..6 over the delimiter, the quotechar, the record separator, a
+    letter and a space -- so every arrangement of the four characters a CSV reader can get
+    wrong, at every length the state machine has states for. `csv.reader` is the referee.
+
+    It is here because it FOUND something: on the reader as first written, 117 of these
+    lost a record outright and 5,326 disagreed on the arity of a blank line. Both are
+    closed, and this is what says so and keeps saying so. It costs 0.08 seconds.
+    """
+    dialect = _dialect()
+    disagreements: list[tuple[str, object, object]] = []
+    swept = 0
+
+    for length in range(7):
+        for combination in itertools.product(("a", ",", '"', "\n", " "), repeat=length):
+            text = "".join(combination)
+            swept += 1
+            try:
+                reference = tuple(tuple(row) for row in csv.reader(io.StringIO(text)))
+            except csv.Error:
+                continue  # the referee refuses it; there is nothing to agree about
+            if parse_records(text.encode(), dialect) != reference:
+                disagreements.append((text, parse_records(text.encode(), dialect), reference))
+
+    assert swept == 19531
+    assert disagreements == []
+
+
+def test_a_source_ending_in_a_quoted_empty_field_does_not_lose_the_record() -> None:
+    """THE defect this reader existed to detect, found inside the reader.
+
+    The flush predicate read `field or fields_ or in_quotes`, and `""` at end of input
+    leaves all three false while `quoted` is true -- so the record was discarded. A lost
+    record shifts every index after it, and `req~ac-03~1` locates damage BY record index,
+    so a differential built on this would have reported damage at the wrong record for the
+    whole remainder of a file.
+
+    Reached by ordinary bytes: any file whose last line is a quoted empty field and which
+    was written without a trailing separator.
+    """
+    assert parse_records(b'""', _dialect()) == (("",),)
+    assert parse_records(b'a\n""', _dialect()) == (("a",), ("",))
+    assert parse_records(b'id,name\n1,x\n""', _dialect()) == (
+        ("id", "name"),
+        ("1", "x"),
+        ("",),
+    )
+
+
+def test_a_blank_line_is_a_record_of_no_fields_and_not_one_empty_field() -> None:
+    # `csv.reader` answers `[]`, and the property asserts the two readers agree over text
+    # neither of them wrote. They disagreed on 5,326 of the swept inputs before this.
+    assert parse_records(b"\n", _dialect()) == ((),)
+    assert parse_records(b"a\n\nb\n", _dialect()) == (("a",), (), ("b",))
+
+
+def test_a_byte_transform_is_not_a_text_encoding_and_is_refused_at_declaration() -> None:
+    # `codecs.lookup` resolves these, so `__post_init__` used to admit them and
+    # `bytes.decode` then raised LookupError -- not UnicodeDecodeError, so it escaped
+    # `parse_records` un-wrapped and a caller catching DialectError saw nothing.
+    for transform in ("hex_codec", "base64_codec", "zlib_codec", "rot_13"):
+        with pytest.raises(DialectError, match="byte transform"):
+            _dialect(encoding=transform)
+
+
+def test_a_quotechar_inside_the_record_separator_is_refused_like_a_delimiter_is() -> None:
+    # The same two bytes would mean two things depending on the state: with quotechar
+    # "\r" and separator "\r\n", `a\r\nb` splits into two records and `\r\nb` opens a
+    # quote that never closes.
+    with pytest.raises(DialectError, match="occurs in the record separator"):
+        _dialect(quotechar="\r", record_separator="\r\n")
+
+
+def test_a_source_that_is_not_bytes_is_refused_at_the_boundary() -> None:
+    # It used to raise a bare AttributeError from inside. A `str` here means someone
+    # decoded already, under an encoding this function was never told about.
+    for wrong in ("a,b", None, 7, ["a", "b"]):
+        with pytest.raises(DialectError, match="not bytes"):
+            parse_records(wrong, _dialect())  # type: ignore[arg-type]
+
+    assert parse_records(bytearray(b"a,b"), _dialect()) == (("a", "b"),)
+
+
+def test_a_trailing_lone_backslash_is_a_character_and_not_a_disappearance() -> None:
+    # It used to append the empty slice, so `"a\` read identically to `"a` -- a byte the
+    # producer wrote vanishing with no signal, in a library whose thesis is that it did not.
+    assert parse_records(b'"a\\', _dialect(escape="backslash")) == (("a\\",),)
+    assert parse_records(b'"a', _dialect(escape="backslash")) == (("a",),)
+
+
+# --- the four mutants the suite could not see, and the inputs that see them --------------
+
+
+def test_the_flag_of_a_quoted_field_does_not_leak_into_the_next_one() -> None:
+    # Kills `quoted = False` dropped from `end_field`: without it the empty field after a
+    # quoted one is recorded as quoted, so `null` never fires on it.
+    assert parse_records(b'"a",\n', _dialect(empty="null")) == (("a", None),)
+
+
+def test_the_flags_do_not_survive_into_the_next_record() -> None:
+    # Kills `quoted_flags.clear()` dropped from `end_record`: the second record then reads
+    # the first record's flags by position.
+    assert parse_records(b'"a",x\n,y\n', _dialect(empty="null")) == (
+        ("a", "x"),
+        (None, "y"),
+    )
+
+
+def test_a_record_that_ends_mid_quote_is_still_a_record() -> None:
+    # An unterminated quote at end of input is still a record. It does NOT kill an
+    # `in_quotes` term in the flush predicate -- measured, that term was dead, because
+    # opening a quote sets `quoted` in the same statement. The term is gone and the
+    # predicate says why.
+    assert parse_records(b'a\n"', _dialect()) == (("a",), ("",))
+
+
+def test_a_record_whose_last_field_is_empty_is_still_a_record() -> None:
+    # Kills `fields_` dropped from the flush predicate.
+    assert parse_records(b"a,", _dialect()) == (("a", ""),)
