@@ -1,0 +1,259 @@
+"""The declared source dialect, and the reader that obeys it.
+
+THE CONTRACT IN ONE SENTENCE: you assert what the producer wrote, and this library proves
+the reader read that. Both halves need the same thing -- a dialect that came from you. A
+dialect this library guessed would make the proof circular, because the guess would be
+made from the same bytes the proof is about.
+
+SO NOTHING HERE INFERS, AND THE OBSERVABLE FORM OF THAT IS THE ONE THAT MATTERS. "It does
+not sniff" is an absence, and an absence cannot be tested. What can be tested is the
+consequence: a WRONGLY declared dialect is OBEYED. Told that a quote inside a quoted field
+is written with a backslash, this reader reads `1,"say ""hi"", bye"` the way that rule says
+to -- the doubled quote closes the field early and the comma inside it becomes a delimiter
+-- and produces three fields where the truth is two. A reader that quietly corrected that
+would be a reader that had guessed, and `req~ac-05~1` measures the false-positive rate of
+exactly that state, which it could not do if the state were unreachable.
+
+WHAT IS VALIDATED AT DECLARATION, and why it is not strictness for its own sake. An
+encoding Python has no codec for, a delimiter of two characters, an escape policy nobody
+implements: each is a dialect this reader cannot honour, and each would otherwise be
+discovered when a batch ran. `contracts.declare` refuses at import for the same reason.
+
+WHAT IS NOT VALIDATED: whether the dialect is TRUE of the bytes. That is not knowable here
+and it is the producer's assertion, which is the whole point.
+
+THE THREE FIELDS THE FLAGSHIP'S LITERAL LACKED are `escape`, `record_separator` and
+`empty`, and each decides one measured incident. The escape policy decides `escape.csv`.
+The record separator decides `multiline.csv`, because a separator inside a quoted field is
+what makes a record and a line stop being the same thing. The empty semantics decides
+whether a zero-length field is an empty string or a null, which is the difference between
+a quality rule firing and not.
+
+[impl->req~ac-04~1]
+"""
+
+from __future__ import annotations
+
+import codecs
+from dataclasses import dataclass, fields
+
+from ingestproof.contracts import type_name
+
+# `double` is RFC 4180 section 2.7: a quote inside a quoted field is written twice.
+# `backslash` is what most non-conforming writers do. `none` is a reader that gives a
+# quoted field no way at all to contain its own quote -- rare, and it is a real dialect
+# rather than a mistake, so it is nameable.
+ESCAPE_POLICIES = ("double", "backslash", "none")
+
+# CR, LF and CRLF, and nothing else. A separator this reader cannot recognise inside a
+# quoted field is a separator that turns every multiline record into the alignment defect
+# this library exists to catch.
+RECORD_SEPARATORS = ("\n", "\r\n", "\r")
+
+# What an UNQUOTED zero-length field means. A QUOTED one is always the empty string: the
+# producer wrote two delimiters around nothing on purpose, and there is nothing to guess.
+EMPTY_SEMANTICS = ("empty-string", "null")
+
+
+class DialectError(Exception):
+    """A source dialect this library refuses, or one it was never given."""
+
+
+@dataclass(frozen=True)
+class Dialect:
+    """A declared source dialect. Every field is required, and that is the criterion.
+
+    A default is an inference with a nicer name: it is the library deciding a value the
+    producer was supposed to state. Frozen for the same reason a `TableContract` is -- a
+    dialect a caller can mutate is a dialect that changes between the parse and the report
+    that cites it.
+    """
+
+    encoding: str
+    delimiter: str
+    quotechar: str
+    escape: str
+    record_separator: str
+    empty: str
+
+    def __post_init__(self) -> None:
+        try:
+            codecs.lookup(self.encoding)
+        except (LookupError, TypeError) as error:
+            raise DialectError(
+                f"no codec for the declared encoding {self.encoding!r}"
+            ) from error
+
+        for name in ("delimiter", "quotechar"):
+            value = getattr(self, name)
+            if not isinstance(value, str) or len(value) != 1:
+                raise DialectError(f"{name} must be exactly one character, not {value!r}")
+
+        if self.delimiter == self.quotechar:
+            raise DialectError(
+                f"delimiter and quotechar are both {self.delimiter!r}: a field could not "
+                "then be told from the quote that opens it"
+            )
+
+        for name, allowed in (
+            ("escape", ESCAPE_POLICIES),
+            ("record_separator", RECORD_SEPARATORS),
+            ("empty", EMPTY_SEMANTICS),
+        ):
+            value = getattr(self, name)
+            if value not in allowed:
+                raise DialectError(f"{name} must be one of {allowed}, not {value!r}")
+
+        if self.delimiter in self.record_separator:
+            raise DialectError(
+                f"delimiter {self.delimiter!r} occurs in the record separator "
+                f"{self.record_separator!r}: no record could end"
+            )
+
+
+def require_dialect(dialect: object) -> Dialect:
+    """Refuse to proceed without a declared dialect, and say why rather than only that.
+
+    The message names both halves: what the caller must do, and what this library will not
+    do instead. "dialect is required" states the rule and withholds the reason, and the
+    reason is the thesis -- a guessed dialect makes the proof circular, because the guess
+    comes from the bytes the proof is about.
+    """
+    if not dialect:
+        raise DialectError(
+            "no source dialect was declared. Declare one: this library will never infer a "
+            "dialect from the bytes it is about to check, because a guess made from those "
+            "bytes cannot then be evidence about them"
+        )
+    if not isinstance(dialect, Dialect):
+        raise DialectError(
+            f"the declared dialect is a {type_name(dialect)} and not a Dialect. Declare "
+            "one rather than a mapping: a mapping has no required fields, so it can infer "
+            "by omission"
+        )
+    return dialect
+
+
+def parse_records(source: bytes, dialect: object) -> tuple[tuple[str | None, ...], ...]:
+    """Bytes and a declared dialect in, records out. RECORDS, never lines.
+
+    A record separator inside a quoted field belongs to the field, so one record can span
+    two lines -- and the whole of `req~ac-03~1` is that the two streams then stop agreeing.
+    This function is on the record side of that, always.
+    """
+    declared = require_dialect(dialect)
+
+    try:
+        text = source.decode(declared.encoding)
+    except UnicodeDecodeError as error:
+        # Obeyed, not corrected: a declared encoding that cannot read these bytes is a
+        # refusal and never an invitation to try another one.
+        raise DialectError(
+            f"the declared encoding {declared.encoding!r} cannot decode this source"
+        ) from error
+
+    return _split(text, declared)
+
+
+def _split(text: str, dialect: Dialect) -> tuple[tuple[str | None, ...], ...]:
+    """The state machine. Four states, and the fourth is where the incidents live.
+
+    Inside a quoted field the delimiter and the record separator are ordinary characters,
+    which is the multiline incident. After a closing quote the reader is between a field
+    that ended and a delimiter that has not arrived, which is the escape incident: under a
+    policy where a doubled quote is NOT an escape, the field ended early and the rest of it
+    is read as though the producer had written it outside the quotes.
+    """
+    separator = dialect.record_separator
+    records: list[tuple[str | None, ...]] = []
+    fields_: list[str] = []
+    field: list[str] = []
+    quoted = False
+    in_quotes = False
+    index = 0
+
+    def end_field() -> None:
+        nonlocal quoted
+        fields_.append("".join(field))
+        field.clear()
+        quoted = False
+
+    def end_record() -> None:
+        end_field()
+        records.append(_finish(tuple(fields_), quoted_flags, dialect))
+        fields_.clear()
+        quoted_flags.clear()
+
+    quoted_flags: list[bool] = []
+
+    while index < len(text):
+        character = text[index]
+
+        if in_quotes:
+            if character == dialect.quotechar:
+                doubled = (
+                    dialect.escape == "double"
+                    and text[index + 1 : index + 1 + len(dialect.quotechar)]
+                    == dialect.quotechar
+                )
+                if doubled:
+                    field.append(dialect.quotechar)
+                    index += 2
+                    continue
+                in_quotes = False
+                index += 1
+                continue
+            if dialect.escape == "backslash" and character == "\\":
+                field.append(text[index + 1 : index + 2])
+                index += 2
+                continue
+            field.append(character)
+            index += 1
+            continue
+
+        if character == dialect.quotechar and not field:
+            in_quotes = True
+            quoted = True
+            index += 1
+            continue
+
+        if character == dialect.delimiter:
+            quoted_flags.append(quoted)
+            end_field()
+            index += 1
+            continue
+
+        if text.startswith(separator, index):
+            quoted_flags.append(quoted)
+            end_record()
+            index += len(separator)
+            continue
+
+        field.append(character)
+        index += 1
+
+    if field or fields_ or in_quotes:
+        quoted_flags.append(quoted)
+        end_record()
+
+    return tuple(records)
+
+
+def _finish(
+    values: tuple[str, ...], quoted_flags: list[bool], dialect: Dialect
+) -> tuple[str | None, ...]:
+    """Apply the empty semantics, and only to fields the producer did not quote.
+
+    `a,,b` under `null` is three fields of which the middle is null. `a,"",b` is three
+    fields of which the middle is the empty string, under either policy: two delimiters
+    around a quoted nothing is a producer saying "empty", not a producer saying nothing.
+    """
+    if dialect.empty != "null":
+        return tuple(values)
+    return tuple(
+        None if value == "" and not quoted_flags[position] else value
+        for position, value in enumerate(values)
+    )
+
+
+FIELD_NAMES = tuple(field.name for field in fields(Dialect))
