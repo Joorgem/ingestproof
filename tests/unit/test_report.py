@@ -102,9 +102,12 @@ def test_two_fields_that_are_both_present_and_null_compare_clean() -> None:
     assert locate((("a", None),), (("a", None),)) == ()
 
 
-def test_two_absent_fields_at_the_same_index_are_not_a_damage() -> None:
-    # Reachable when two records of unequal length are compared against a third that is
-    # longer than both -- the tail indices are absent on both sides.
+def test_two_records_of_equal_length_and_equal_values_are_clean() -> None:
+    # This was written claiming to cover an absent-on-BOTH-sides case, and that comment
+    # described a mechanism `locate` does not have: it compares PAIRWISE, so there is no
+    # third record, and these two are equal-length anyway. The branch it claimed to reach
+    # could not fire at all, and the false comment is what would have stopped a reader
+    # noticing. The branch is gone; this is the plain assertion it always was.
     assert locate((("a",), ("b",)), (("a",), ("b",))) == ()
 
 
@@ -154,7 +157,7 @@ def test_a_stream_that_is_not_iterable_is_refused_rather_than_escaping(which: st
     streams = {"expected": (("a",),), "actual": (("a",),)}
     streams[which] = None  # type: ignore[assignment]
 
-    with pytest.raises(Misaligned, match="is not iterable"):
+    with pytest.raises(Misaligned, match="not iterable"):
         locate(streams["expected"], streams["actual"])  # type: ignore[arg-type]
 
 
@@ -175,6 +178,111 @@ def test_a_RECORD_that_is_not_iterable_is_refused_and_the_message_names_its_inde
 
 
 # --- what Damage deliberately does not carry -----------------------------------------------
+
+
+def test_the_denominator_is_what_was_compared_and_not_a_second_read() -> None:
+    """A `Report` claiming ONE DAMAGE OUT OF ZERO RECORDS COMPARED, measured.
+
+    `report` used to snapshot `expected` a second time for the denominator. For a
+    generator the second read comes back empty, so the damages were right and the number
+    they were out of was zero -- in the field that exists precisely so a count is never
+    published as a rate. `locate` delegates to `report` now, and the stream is read once.
+    """
+
+    def stream() -> object:
+        yield ("a",)
+        yield ("b",)
+        yield ("c",)
+
+    result = report(stream(), (("a",), ("X",), ("c",)))  # type: ignore[arg-type]
+
+    assert result.records_compared == 3
+    assert result.damages == (
+        Damage(record_index=1, field_index=0, expected="b", actual="X"),
+    )
+
+
+@pytest.mark.parametrize(
+    "stream",
+    ("hello", b"hello", bytearray(b"hi")),
+    ids=("str", "bytes", "bytearray"),
+)
+def test_a_string_is_refused_because_a_string_is_a_sequence_of_characters(
+    stream: object,
+) -> None:
+    """`str` IS a `Sequence[str]`, so `Sequence[Record]` accepts one and mypy says nothing.
+
+    Measured: `report("hello", "hello")` answered zero damages out of FIVE RECORDS
+    COMPARED -- a plausible, publishable, wrong denominator from a caller who passed one
+    record where a stream belongs. This is a check on the CONTAINER, not on a value, so it
+    does not cross the line `_snapshot` draws about comparing.
+    """
+    with pytest.raises(Misaligned, match="sequence of characters"):
+        report(stream, stream)  # type: ignore[arg-type]
+
+
+def test_a_mapping_record_is_refused_because_iterating_one_yields_its_keys() -> None:
+    """Two records agreeing on every key and differing on every value compared CLEAN.
+
+    `promotion.Record` is a `Mapping` in this same package, so handing one module's record
+    to the other is a step a caller can take -- and it produced a clean bill of health on
+    data where nothing matched.
+    """
+    with pytest.raises(Misaligned, match="yields its KEYS"):
+        locate([{"id": "2", "name": "fine"}], [{"id": "2", "name": "OTHER"}])  # type: ignore[list-item]
+
+
+def test_the_refusal_carries_a_reason_a_caller_can_branch_on() -> None:
+    # Not a substring of the message. A length mismatch is what resynchronisation exists
+    # for; a record that is not a sequence is a caller's bug. A caller telling them apart
+    # by matching on prose is a caller depending on prose.
+    reasons = []
+    for left, right in (
+        ((("a",),), (("a",), ("b",))),
+        (None, (("a",),)),
+        ("hello", "hello"),
+    ):
+        with pytest.raises(Misaligned) as raised:
+            locate(left, right)  # type: ignore[arg-type]
+        reasons.append(raised.value.reason)
+
+    assert reasons == ["length", "unreadable", "not-a-sequence"]
+
+
+def test_a_comparison_that_raises_does_not_discard_the_damages_already_found() -> None:
+    """All-or-nothing was the defect, not the exception type.
+
+    Measured: 999 real damages found, one bad value at record 999, and every one of the
+    999 was discarded -- in a module whose docstring says the job is to lose nothing. A
+    comparison that fails answers NOT SAME now, which is the conservative direction here
+    for the same reason quarantine is in `promotion`: a pair this library cannot show to
+    be equal is one it must not certify as equal.
+    """
+
+    class Boom(str):
+        def __eq__(self, other: object) -> bool:
+            raise ValueError("the caller's __eq__")
+
+        def __hash__(self) -> int:
+            return str.__hash__(self)
+
+    damages = locate((("x",), (Boom("a"),)), (("y",), ("a",)))
+
+    assert [(one.record_index, one.field_index) for one in damages] == [(0, 0), (1, 0)]
+
+
+def test_the_sentinel_cannot_be_smuggled_in_to_make_a_difference_vanish() -> None:
+    # `_ABSENT` is module-private and plainly reachable. Under the single-loop shape it
+    # made a real difference disappear: a record of one field against a record of none
+    # reported nothing. The prefix-and-tail shape has no branch to reach.
+    from ingestproof.report import _ABSENT
+
+    assert locate([(_ABSENT,)], [()]) == (  # type: ignore[list-item]
+        Damage(record_index=0, field_index=0, expected=None, actual=None),
+    )
+    assert locate([(None,)], [()]) == (
+        Damage(record_index=0, field_index=0, expected=None, actual=None),
+    )
 
 
 def test_a_damage_carries_no_line_number_and_no_byte_position() -> None:

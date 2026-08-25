@@ -20,16 +20,23 @@ reference side -- so byte attribution over clean data is not obtainable from the
 WHAT THIS MODULE IS NOT. `locate` is handed two ALIGNED record streams. Producing them --
 running two parsers over a corpus, and resynchronising after a divergence -- is the
 differential and the resynchronisation, which docs/design.md section 15 assigns to a human
-or to adjudication. What is here is the refusal: `locate` will not zip streams of
-different lengths, because a positional zip IS the 500-for-1 defect above and a report
-built on one is worse than no report.
+or to adjudication. What is here is the refusal: it will not zip streams of different
+lengths, because a positional zip IS the 500-for-1 defect above and a report built on one
+is worse than no report.
+
+A STREAM IS READ EXACTLY ONCE, and that is a correctness rule rather than an efficiency
+one. `report` used to snapshot `expected` a second time for the denominator, and for a
+generator that second read came back EMPTY -- measured, a Report claiming ONE DAMAGE OUT
+OF ZERO RECORDS COMPARED. `records_compared` exists so a count is never published as a
+rate; a denominator re-derived from a second read is that same defect wearing the fix's
+clothes.
 
 [impl->req~ac-03~1]
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -37,15 +44,33 @@ type Record = Sequence[str | None]
 
 
 class Misaligned(Exception):
-    """Two record streams that do not line up, so nothing may be compared positionally."""
+    """Two record streams that cannot be compared positionally.
+
+    `reason` is a field rather than a substring of the message, because the situations are
+    not equally recoverable: a length mismatch is what resynchronisation exists for, while
+    a record that is not a sequence is a caller's bug. A caller matching on `str(error)` to
+    tell them apart is a caller depending on prose.
+    """
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
 
 
-# NOT `None`. A field that is ABSENT and a field that is present and NULL are different
-# facts, and `None` is already the second one -- `dialect.parse_records` returns it under
-# `empty="null"`. Compared as `None` on both sides they are EQUAL, so the damage goes
-# unreported: measured, a record `('a', None)` against `('a',)` yields nothing at all.
-# Silent loss, in the function whose job is to lose nothing.
-_ABSENT = object()
+# NOT `None`, and not a bare `object()` either. A field that is ABSENT and a field that is
+# present and NULL are different facts, and `None` is already the second one --
+# `dialect.parse_records` returns it under `empty="null"`. Compared as `None` on both sides
+# they are EQUAL, so the damage goes unreported: measured, `('a', None)` against `('a',)`
+# yielded nothing at all. Silent loss, in the function whose job is to lose nothing.
+#
+# A private CLASS rather than a bare sentinel object, so the test is `type(x) is _Absent` --
+# which nothing outside this module produces by accident, and which does not consult the
+# value's `__eq__`.
+class _Absent:
+    __slots__ = ()
+
+
+_ABSENT = _Absent()
 
 
 @dataclass(frozen=True)
@@ -76,7 +101,8 @@ class Report:
     `records_compared` is not bookkeeping. `req~ac-05~1` exists because published figures
     "reuse a denominator from a different experiment and must be re-derived before being
     cited" -- the spec's own words. A report that carries its own denominator makes that
-    class of citation impossible from this side.
+    class of citation impossible from this side, PROVIDED the denominator is the number of
+    records this call actually walked rather than a second count of the same input.
     """
 
     damages: tuple[Damage, ...]
@@ -89,45 +115,88 @@ def locate(expected: Sequence[Record], actual: Sequence[Record]) -> tuple[Damage
     Ordered by record and then by field, so a triager reads a report the way they read the
     file. Refuses rather than zips when the lengths differ -- see `Misaligned`.
     """
+    return report(expected, actual).damages
+
+
+def report(expected: Sequence[Record], actual: Sequence[Record]) -> Report:
+    """`locate` plus the denominator, and the ONE place either stream is read.
+
+    `locate` delegates here rather than the other way round, so the number reported as
+    `records_compared` is the number of records this call actually walked.
+    """
     left = _snapshot(expected, "expected stream")
     right = _snapshot(actual, "actual stream")
 
     if len(left) != len(right):
         raise Misaligned(
+            "length",
             f"the two record streams are {len(left)} and {len(right)} records long, so "
             "they do not line up and a positional comparison would report the "
             "misalignment rather than the damage -- about 500 divergences for one, "
             "measured. Resynchronise first: re-anchor on records that agree byte for byte "
-            "and compare the bounded span between them"
+            "and compare the bounded span between them",
         )
 
     damages: list[Damage] = []
 
-    # `strict=True` cannot fire after the length check above, and it is here anyway --
-    # not as a live guard but so that an edit removing that check turns into a raise
-    # rather than into a silent truncation. Unlike a dead term in a boolean, it does
-    # not make the expression read as though it decides something today.
+    # `strict=True` cannot fire after the length check above, and it is here anyway -- not
+    # as a live guard but so that an edit removing that check turns into a raise rather
+    # than into a silent truncation.
     for index, (before, after) in enumerate(zip(left, right, strict=True)):
         one = _snapshot(before, f"record {index} of the expected stream")
         two = _snapshot(after, f"record {index} of the actual stream")
+        shared = min(len(one), len(two))
 
-        for position in range(max(len(one), len(two))):
-            here = one[position] if position < len(one) else _ABSENT
-            there = two[position] if position < len(two) else _ABSENT
-            if here is _ABSENT and there is _ABSENT:
-                continue
-            if here is not _ABSENT and there is not _ABSENT and here == there:
-                continue
+        # THE COMMON PREFIX AND THE TAIL ARE TWO LOOPS, not one loop over `max`. One loop
+        # needs an absent-on-BOTH-sides branch, and that branch cannot fire -- proven by
+        # enumeration over every pair of record widths. A branch that cannot fire is
+        # reachable only by smuggling the sentinel in, and it made a real difference vanish
+        # when someone did. Two loops delete the branch and the hole together.
+        for position in range(shared):
+            if not _same(one[position], two[position]):
+                damages.append(_damage(index, position, one[position], two[position]))
+
+        longer, absent_on_the_right = (one, True) if len(one) > len(two) else (two, False)
+        for position in range(shared, len(longer)):
+            value = longer[position]
             damages.append(
-                Damage(
-                    record_index=index,
-                    field_index=position,
-                    expected=None if here is _ABSENT else cast("str | None", here),
-                    actual=None if there is _ABSENT else cast("str | None", there),
+                _damage(
+                    index,
+                    position,
+                    value if absent_on_the_right else _ABSENT,
+                    _ABSENT if absent_on_the_right else value,
                 )
             )
 
-    return tuple(damages)
+    return Report(damages=tuple(damages), records_compared=len(left))
+
+
+def _same(here: object, there: object) -> bool:
+    """Whether two values are the same, and never an escape when they cannot be compared.
+
+    A caller's `__eq__` running here is the WORK rather than a leak: comparing values is
+    this function's job, which is the line `promotion._judge` sits on the other side of.
+    What was not acceptable is the consequence of letting a failure escape -- measured, one
+    bad value at record 999 discarded 999 damages already found, in a module whose own
+    docstring says the job is to lose nothing.
+
+    So a comparison that fails answers NOT SAME. That is the conservative direction here
+    for the same reason quarantine is the conservative direction in `promotion`: a pair
+    this library cannot show to be equal is a pair it must not certify as equal.
+    """
+    try:
+        return bool(here == there)
+    except Exception:
+        return False
+
+
+def _damage(index: int, position: int, here: object, there: object) -> Damage:
+    return Damage(
+        record_index=index,
+        field_index=position,
+        expected=None if type(here) is _Absent else cast("str | None", here),
+        actual=None if type(there) is _Absent else cast("str | None", there),
+    )
 
 
 def _snapshot(values: object, what: str) -> tuple[Any, ...]:
@@ -136,23 +205,35 @@ def _snapshot(values: object, what: str) -> tuple[Any, ...]:
     The same reason `promotion._snapshot` exists: `len` and indexing walk the caller's live
     container, and reading one is itself caller code. Nothing caller-supplied is
     interpolated into the message, because naming the type would run the very read this is
-    guarding -- `what` is a literal built here.
+    guarding -- `what` is a literal built at the call site.
 
-    The VALUES are not snapshotted or type-checked, and that line is deliberate: comparing
-    them is this function's job, so a value's `__eq__` running is the work rather than an
-    escape. That is the difference between here and a refusal path.
+    TWO CONTAINERS ARE REFUSED FOR READING WRONG RATHER THAN FOR FAILING TO READ, which is
+    the harder case and which `promotion._snapshot` has no reason to cover:
+
+    A `str` IS a `Sequence[str]`, so `Sequence[Record]` and `Record` both accept one and
+    mypy says nothing. Measured: `report("hello", "hello")` answered zero damages out of
+    FIVE RECORDS COMPARED -- a plausible, publishable, wrong denominator, from a caller who
+    passed one record where a stream belongs.
+
+    A `Mapping` iterates its KEYS. Measured: two records agreeing on every key and
+    differing on every value compared CLEAN. `promotion.Record` is a `Mapping` in this same
+    package, so handing one module's record to the other is a step a caller can take.
     """
+    if isinstance(values, str | bytes | bytearray):
+        raise Misaligned(
+            "not-a-sequence",
+            f"{what}: a string is a sequence of characters, so comparing one would count "
+            "characters as records or as fields",
+        )
+    if isinstance(values, Mapping):
+        raise Misaligned(
+            "not-a-sequence",
+            f"{what}: iterating a mapping yields its KEYS, so two records agreeing on "
+            "every key and differing on every value would compare clean",
+        )
     try:
         return tuple(cast("Iterable[Any]", values))
     except TypeError as error:
-        raise Misaligned(f"the {what} is not iterable") from error
+        raise Misaligned("unreadable", f"{what}: not iterable") from error
     except Exception as error:
-        raise Misaligned(f"the {what} could not be read") from error
-
-
-def report(expected: Sequence[Record], actual: Sequence[Record]) -> Report:
-    """`locate` plus the denominator, so a count is never published as a rate."""
-    return Report(
-        damages=locate(expected, actual),
-        records_compared=len(_snapshot(expected, "expected stream")),
-    )
+        raise Misaligned("unreadable", f"{what}: could not be read") from error
