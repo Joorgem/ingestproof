@@ -271,17 +271,21 @@ def test_a_comparison_that_raises_does_not_discard_the_damages_already_found() -
     assert [(one.record_index, one.field_index) for one in damages] == [(0, 0), (1, 0)]
 
 
-def test_the_sentinel_cannot_be_smuggled_in_to_make_a_difference_vanish() -> None:
-    # `_ABSENT` is module-private and plainly reachable. Under the single-loop shape it
-    # made a real difference disappear: a record of one field against a record of none
-    # reported nothing. The prefix-and-tail shape has no branch to reach.
-    from ingestproof.report import _ABSENT
+@pytest.mark.parametrize("value", (None, "", "a", 0, object()), ids=lambda v: type(v).__name__)
+def test_a_field_present_on_one_side_is_a_damage_whatever_the_value_is(value: object) -> None:
+    """No value can make an absent field compare clean, and that is now structural.
 
-    assert locate([(_ABSENT,)], [()]) == (  # type: ignore[list-item]
-        Damage(record_index=0, field_index=0, expected=None, actual=None),
-    )
-    assert locate([(None,)], [()]) == (
-        Damage(record_index=0, field_index=0, expected=None, actual=None),
+    There WAS an absent sentinel here, because a single loop over the longer record had to
+    mark the absent side somehow and marking it `None` made an absent field and a null
+    field equal. The sentinel fixed that and a caller could then smuggle it in and make a
+    real difference vanish.
+
+    With the prefix and the tail as two loops the tail emits a damage unconditionally, so
+    there is no marker to smuggle and no value to get wrong -- measured, replacing the
+    sentinel with `None` killed no test in the whole ring, which is what said it was dead.
+    """
+    assert locate([(value,)], [()]) == (  # type: ignore[list-item]
+        Damage(record_index=0, field_index=0, expected=value, actual=None),  # type: ignore[arg-type]
     )
 
 

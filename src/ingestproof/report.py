@@ -57,21 +57,19 @@ class Misaligned(Exception):
         self.reason = reason
 
 
-# NOT `None`, and not a bare `object()` either. A field that is ABSENT and a field that is
-# present and NULL are different facts, and `None` is already the second one --
-# `dialect.parse_records` returns it under `empty="null"`. Compared as `None` on both sides
-# they are EQUAL, so the damage goes unreported: measured, `('a', None)` against `('a',)`
-# yielded nothing at all. Silent loss, in the function whose job is to lose nothing.
+# THERE IS NO ABSENT SENTINEL, and there was one until the loop below was split in two.
 #
-# A private CLASS rather than a bare sentinel object, so the test is `type(x) is _Absent` --
-# which nothing outside this module produces by accident, and which does not consult the
-# value's `__eq__`.
-class _Absent:
-    __slots__ = ()
-
-
-_ABSENT = _Absent()
-
+# The reason it existed is real and worth keeping written down: `dialect.parse_records`
+# returns `None` for an unquoted empty field under `empty="null"`, so `None` already means
+# "present and null". A single loop over `max(len(one), len(two))` had to mark the absent
+# side somehow, and marking it `None` made an absent field and a null field compare EQUAL --
+# measured, `('a', None)` against `('a',)` reported nothing at all.
+#
+# The sentinel fixed that and was then measured DEAD: with the prefix and the tail as two
+# loops, the tail emits a damage unconditionally, so what the absent side is marked with
+# cannot change the answer. Replacing the sentinel with `None` killed no test in the whole
+# ring. A value that can never change the answer reads like one that can, so it is gone and
+# the tail says `None` directly.
 
 @dataclass(frozen=True)
 class Damage:
@@ -154,17 +152,24 @@ def report(expected: Sequence[Record], actual: Sequence[Record]) -> Report:
         # when someone did. Two loops delete the branch and the hole together.
         for position in range(shared):
             if not _same(one[position], two[position]):
-                damages.append(_damage(index, position, one[position], two[position]))
+                damages.append(
+                    Damage(
+                        record_index=index,
+                        field_index=position,
+                        expected=cast("str | None", one[position]),
+                        actual=cast("str | None", two[position]),
+                    )
+                )
 
         longer, absent_on_the_right = (one, True) if len(one) > len(two) else (two, False)
         for position in range(shared, len(longer)):
-            value = longer[position]
+            value = cast("str | None", longer[position])
             damages.append(
-                _damage(
-                    index,
-                    position,
-                    value if absent_on_the_right else _ABSENT,
-                    _ABSENT if absent_on_the_right else value,
+                Damage(
+                    record_index=index,
+                    field_index=position,
+                    expected=value if absent_on_the_right else None,
+                    actual=None if absent_on_the_right else value,
                 )
             )
 
@@ -188,15 +193,6 @@ def _same(here: object, there: object) -> bool:
         return bool(here == there)
     except Exception:
         return False
-
-
-def _damage(index: int, position: int, here: object, there: object) -> Damage:
-    return Damage(
-        record_index=index,
-        field_index=position,
-        expected=None if type(here) is _Absent else cast("str | None", here),
-        actual=None if type(there) is _Absent else cast("str | None", there),
-    )
 
 
 def _snapshot(values: object, what: str) -> tuple[Any, ...]:
