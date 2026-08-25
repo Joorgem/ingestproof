@@ -51,10 +51,17 @@ this call read and accounted for, and the spans say which of them went unverifie
 frozen acceptance file asserts 3 for a file whose value comparison never ran.
 
 WHAT IS NOT HERE. The anchor search is quadratic in the DISTANCE to the anchor, not in the
-file: it runs only after a divergence and stops at the first agreement. One embedded
-separator costs three candidate comparisons. A file whose streams never re-agree costs the
-square of what is left, and bounding that search is `req~ac-02b~1`'s problem, on a corpus
-that can show what the bound should be.
+file: it runs only after a divergence and stops at the first agreement. Measured on
+`multiline.csv` by counting the calls: FIVE candidate comparisons in the search, seven
+counting the two the walk spends finding the divergence. A file whose streams never
+re-agree costs the square of what is left, and bounding that search is `req~ac-02b~1`'s
+problem, on a corpus that can show what the bound should be.
+
+(This paragraph said THREE until the calls were counted, and the commit that introduced
+this module says three as well. Nothing derived from the number -- it was an estimate
+written in the present indicative. It is the third claim in this one turn not to survive
+being measured: a unit test that named an adjudication it did not distinguish, a mutant
+filed as equivalent that was not, and this.)
 
 [impl->req~ac-02a~1]
 """
