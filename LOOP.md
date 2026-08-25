@@ -11,8 +11,8 @@ off switches, and they are written in `docs/allowlist-rollback.md` rather than h
 because this file is regenerated: anything added to it by hand is erased by the next
 render, which is when nobody is watching.
 
-Turns: **19**
-Chain tip: `85ef8356292385a66653c04c0816facb663874725f7bd4fef0bd8d011176a154`
+Turns: **20**
+Chain tip: `bffd24115a81f2681b4d772a5693a361ff1cd532479851301aa67420d8bf1c21`
 
 Rows that correct an earlier row are in the chain but not in these counts. They
 are not turns, and counting them would grow the number of turns every time a
@@ -22,12 +22,12 @@ figure is corrected.
 
 | | turns |
 |---|---|
-| human | 14 |
+| human | 15 |
 | loop | 5 |
 
 ### By outcome
 
 | | turns |
 |---|---|
-| GREEN | 19 |
+| GREEN | 20 |
 
