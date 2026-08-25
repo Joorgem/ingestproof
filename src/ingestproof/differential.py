@@ -73,6 +73,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from ingestproof.dialect import parse_records
+
+# `_snapshot` IS REACHED FOR ACROSS THE MODULE BOUNDARY ON PURPOSE, and the alternative was
+# weighed rather than overlooked. It is fifteen lines of guard whose two refusals were each
+# MEASURED -- a `str` counted five characters as records, a `Mapping` compared two records
+# clean by iterating their keys -- and this module needs the same guard before it can take
+# a length. A second copy would be a second place for the defect class this repository has
+# now hit five times to live, and the two copies would drift the first time one is fixed.
 from ingestproof.report import Damage, Record, _snapshot, report
 
 # Adjudication 2. A module-level constant produces no mutant under mutmut 3, so
