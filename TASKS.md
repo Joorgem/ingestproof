@@ -56,6 +56,272 @@ Measured on the drafts: **23 xfailed** under `uv run pytest`, and **23 failed** 
 `ingestproof.dialect`, `ingestproof.report` and `ingestproof.differential` respectively, so
 each marker evaporates on its own when the module lands.
 
+## P3 — the platform path
+
+Layer 1's job resource and layer 2's report meet Spark here. `docs/design.md` section 15
+marks P3 **mista** without saying where the line falls; the line is the allowlist in
+`tools/hooks/ingestproof_allowlist.py`, and item 6 is the one thing this phase delivers
+that falls outside it.
+
+Both of P3's gates are `Ring: nightly` in `.spec/acceptance.md`. That does not change what
+closes an item, but it changes where the second signal is produced and who may record it —
+see the ring note below.
+
+**No row here is dispatchable yet.** Three commits on frozen paths have to land first and
+none of them exists; they are under "What P3 is owed". A turn that takes row 1 today has
+nothing to import and no test to turn green.
+
+| # | task | who | closes when |
+|---|---|---|---|
+| 1 | The Spark entry point: read `promote ∪ quarantine` for one `_batch_id` out of a local open-source Delta table and hand the differential the two record streams it already takes. `pyspark` and `delta` are imported **inside** the function, never at module scope. | loop | `req~ac-08a~1` acceptance test's local-Delta reading case green in the nightly |
+| 2 | The verdict fails the task: any damage raises out of that entry point, a clean batch returns. It does not log and continue, and it takes no credential. | loop | `req~ac-08a~1` acceptance test's failed-task case green in the nightly |
+| 3 | `audit_rows(report, batch_id, contract_id)`: a `Report` becomes rows with a fixed column set carrying `records_compared`, so the denominator reaches the table and a count is never stored as a rate. Pure Python; no Spark import. | loop | `req~ac-18~1` acceptance test's denominator case green in the nightly |
+| 4 | The writer targets `<catalog>.<schema>.<table>` taken from the declaration — a three-level name, never a path. | loop | `req~ac-18~1` acceptance test's three-level-name case green in the nightly |
+| 5 | `table_resource`, beside `job_resource` in `src/ingestproof/contracts.py`: the audit table with `owner` and `grant`, emitted in the same small subset `load_job_yaml` reads back. | loop | `req~ac-18~1` covered and its acceptance test green in the nightly |
+| 6 | `databricks/resources/*.yml` committed: what item 5 emits, checked in under that path. | **human** | `req~ac-08a~1` covered and its acceptance test green in the nightly |
+
+Two rules govern the "closes when" column, and the second is the general form of the first.
+
+1. Every row names a distinct **case** of one acceptance test, and the row that closes a
+   whole criterion is the **last** row touching that criterion — row 5 for `req~ac-18~1`,
+   row 6 for `req~ac-08a~1`.
+2. **A row may not close a criterion whole if any row below it, of either `who`, delivers
+   something that criterion's own text requires.** Where the criterion's text names an
+   artefact no row above can produce, there are exactly two repairs: move the close down to
+   the row that produces the artefact, or constrain the frozen acceptance test — in the
+   debt subsection, where whoever writes it will read it — so the requirement is observed
+   where it is produced rather than where it is committed. Both repairs are used below.
+
+The other way round is a queue that cannot run: a row closing on whole-criterion coverage,
+sitting above rows that deliver what the criterion needs, is a row the loop holds and
+cannot green, and the loop takes first-unclosed. With row 6 being a human's, that shape
+stops the phase outright rather than merely stalling it. Do not fix it by reordering the
+table either — item 6 is a hand-commit of what item 5's emitter produces, and the file
+cannot precede the emitter.
+
+Rule 2 is what row 5 has to answer for. `req~ac-18~1`'s text requires "owner and grant
+declared in the bundle YAML", and the committed bundle YAML is row 6, below it. Row 5 keeps
+the close only because the debt subsection pins the `ac-18` acceptance test to the
+**emitter's returned string** rather than to a committed path. Without that constraint,
+row 5 is unclosable for the same reason row 1 was.
+
+### Why item 6 is not the loop's
+
+The allowlist hook writes the line. `tools/hooks/ingestproof_allowlist.py` carries
+`WRITABLE_PREFIXES = ("src/", "tests/unit/", "tests/property/", "docs/")` and
+`WRITABLE_FILES = ("LOOP.md",)`, and its final branch is default-deny. `databricks/` is in
+neither list, and it is in no glob of `tools/frozen.txt` either — which is the class that
+hook's own docstring names: *"For a path that is neither writable nor frozen, CI never
+looks, and this is the only thing that refuses."* `tests/integration/**` is the measured
+example of the same class, recorded in `docs/design.md` section 7.3.
+
+The emitter is a different question from the file, and that is why item 5 is the loop's and
+item 6 is not. `job_resource` and `job_yaml` already live in `src/ingestproof/contracts.py`
+(lines 239 and 265), the loop may extend them, and its output is a string. Turning that
+string into a tracked file under `databricks/` is the write the hook refuses.
+
+It refuses only the editing tools — the docstring says so: *"it cannot parse arbitrary
+shell, and it is not asked to."* That is a gap, not a permission. A turn that shelled out
+to write the path the hook denies is `docs/design.md` section 14's "o agente atacar o gate",
+committed by the thing the gate exists to watch.
+
+Nothing in this queue touches a workspace. `prompt.md` says **"Never touch Databricks. The
+quota is per-account and shared with a live lane"**, and `docs/design.md` section 8 item 8
+gives the one exception: AC-08b, run by hand by Jorge, outside the loop, with the flagship
+lane stopped. AC-08b is `Ring: external` in `.spec/acceptance.md` and section 15 puts it
+outside the phase table entirely, so it is not a row here.
+
+### The ring: both of P3's gates are nightly
+
+`.spec/acceptance.md` gives `req~ac-08a~1` and `req~ac-18~1` the same two fields:
+`Ring: nightly` and `Needs: impl, utest`. P3 is the first phase where that is true of every
+gate — P1's `req~ac-01~1` and `req~ac-07~1` are inner, and so are all four of P2's.
+
+The two signals part company here.
+
+- **Signal 1 can be read inside a turn.** OFT needs only the JVM, and `CLAUDE.md`'s Java
+  section records `$JAVA_HOME/bin/java` at 17.0.19 on the development machine. It is called
+  nightly because CI's inner ring carries no JVM step, not because a turn cannot run it.
+- **Signal 2 is produced in no turn's own test run.** The acceptance test needs Spark.
+  `pyproject.toml`'s `addopts` is `-m 'not external and not nightly'`, so `uv run pytest`
+  deselects it by construction; `CLAUDE.md`'s ring table says the inner ring has no JVM, no
+  Spark and no network; and that table also says the nightly ring is **Linux only**, while
+  turns run on Windows.
+
+So signal 2 comes out of `.github/workflows/nightly.yml` and nowhere else. That workflow
+carries `workflow_dispatch` beside its cron, so the observation is a dispatch rather than a
+calendar day, and its `traceability` job uploads `oft-report.txt` and `oft-spec-count.txt`
+as the `oft-report` artifact — signal 1 comes back from the same run. That upload step
+carries `if: always()`, so the report returns even from a run whose `Trace` step failed,
+which is what makes this readable at all while the nightly is in the state the debt
+subsection records.
+
+One asymmetry to expect while reading the two together: the id can still be in the report
+when the acceptance test is already green. `Needs: impl, utest` wants both tags, and this
+file's own "How signal 1 is read" table calls `(-impl, utest)` the state where "the
+acceptance test cites it; nothing implements it". Writing the `[impl->req~ac-08a~1]` tag
+into `src/**` is a separate edit from writing the code, and it is a turn's to make. Green
+test plus present id means the tag is missing, not that the work is wrong.
+
+**Note — this is not an exception to the closing rule at the bottom of this file.** Both
+signals still have to hold and neither is something a turn can write. What changes is where
+signal 2 is produced, and who is allowed to record that it held.
+
+**The close must be recorded by an agent-authored turn; a human's turn will not do it.**
+`turns_since_close` (`loop/run_turn.py:90-97`) walks the ledger backwards and `continue`s
+past any entry for which `is_loop_turn` is false, and `is_loop_turn`
+(`loop/ledger.py:59-70`) is `is_turn(entry) and entry.get("author") != "human"`. A **human**
+row carrying `closed_criterion` is therefore skipped rather than counted as a reset, and the
+walk keeps counting backwards past it. Measured on `$LOOP_HOME/iterations.jsonl`, 31 rows:
+seq 30 is `author=human` with `closed_criterion=req~ac-02a~1`, and `is_loop_turn` is
+**False**; the counter reads 0 only because seq 28 (`author=loop`,
+`closed_criterion=req~ac-03~1`) resets it. Closing a P3 criterion as a human leaves the
+brake exactly where it was.
+
+The recording turn therefore observes both signals itself rather than being told: dispatch
+the workflow, wait for the run, read its conclusion, download the `oft-report` artifact, and
+only then write `closed_criterion` — which is what `prompt.md` already requires, "only when
+both signals in `TASKS.md`'s closing rule were observed". That a turn may do network GitHub
+work is not an assumption: `prompt.md`'s Finishing section already has it opening a pull
+request and waiting for a reviewer to conclude. `CLAUDE.md`'s "no network" is a property of
+the inner ring's test command, not of the turn.
+
+**The budget is turns, not rows.** `turns_since_close` counts the ledger's trailing loop
+turns across the whole ledger — a row may cost more than one turn, and the count when P3
+starts is whatever the phase before it left. Read the real number before dispatching rather
+than counting rows in this table:
+
+```bash
+uv run python -c "from loop.ledger import read_all; from loop.run_turn import turns_since_close; print(turns_since_close(read_all()))"
+```
+
+Keep it under `STALL_LIMIT = 5` by dispatching a nightly and letting an agent-authored turn
+record the close. **Fallback:** let `stall_report` fire at five and have a human restart the
+loop. It is the fallback and not the plan — its text blames the task wording, and for P3
+that diagnosis would be false.
+
+### What P3 is owed before any item here can close
+
+Three commits, all on frozen paths, all a human's. None of them exists today.
+
+**The two frozen acceptance tests do not exist.** `tests/acceptance/` holds nine files —
+`test_ac01`, `test_ac02a`, `test_ac03`, `test_ac04`, `test_ac07`, `test_ac09`, `test_ac10`,
+`test_ac17` and `test_frozen_pins` — and `tools/frozen.sha256` lists exactly those nine.
+Nothing cites `req~ac-08a~1` or `req~ac-18~1`. `tests/acceptance/**` is frozen by
+`tools/frozen.txt`, so those two files are a human's commit, unwritten and undrafted:
+
+- `tests/acceptance/test_ac08a_the_check_runs_inside_spark_against_local_delta.py`
+- `tests/acceptance/test_ac18_the_audit_report_lands_in_a_unity_catalog_table.py`
+
+Each has to carry the cases the rows above name, or a row has nothing to close against.
+Two of those cases carry a constraint on **how** they assert, and it is not decoration —
+rule 2 above is discharged by it:
+
+- **The `ac-18` owner-and-grant case must assert against what `table_resource`/`job_yaml`
+  return, not against a file on disk.** `req~ac-18~1`'s text
+  (`.spec/acceptance.md:211-214`) says "with owner and grant declared in the bundle YAML"
+  and says nothing about that YAML being committed; the committed-file requirement lives in
+  `req~ac-08a~1`, which names `databricks/resources/*.yml` explicitly. Reading the emitter's
+  output is therefore the criterion's literal reading, not a weakening of it. A test that
+  instead opened the committed path would make row 5 — a `loop` row — depend on row 6, a
+  human's, and the phase would deadlock exactly as it did before round 1.
+- **The `ac-08a` committed-bundle case should assert that the committed file equals what the
+  emitter returns.** That is where the drift the first constraint opens up gets closed: with
+  `ac-18` checking content and `ac-08a` checking that the tracked file is that content, a
+  hand-edited `databricks/resources/*.yml` fails a gate instead of passing quietly.
+
+**Make the first constraint mechanical, in the same commit.** A stated constraint on a
+frozen file is only as good as the next person's reading of it, and that is the queue's
+worst remaining residual: if the `ac-18` file opens the committed path, row 5 becomes
+unclosable and nothing in the queue notices until the brake fires. It does not have to stay
+stated. `tests/unit/**` is outside the frozen set, so a unit test may read the `ac-18`
+acceptance file's own source and assert it does not reference `databricks/resources` —
+after which the frozen file cannot be written or later edited to open that path without a
+red inner ring. The precedent is in the tree: `tests/unit/test_allowlist_hook.py` asserts
+properties of a frozen gate from the writable side, and its docstring says so in as many
+words.
+
+**That guard belongs in the human's acceptance-file commit, not in a row of this queue**,
+for two reasons that are both mechanical rather than stylistic:
+
+- **A row closing no criterion cannot close at all.** Nothing in `.spec/acceptance.md`
+  requires a unit test about another test's source, so such a row would name no criterion,
+  and the closing rule at the bottom of this file admits no other way to close an item. The
+  loop takes first-unclosed: the row would jam the queue permanently, not merely stall it.
+  Carrying it as a row would therefore cost P3 an explicit exception to the closing rule,
+  and a guard is not worth spending that on.
+- **It is needed before row 1, and a row cannot be there.** The guard's value is at the
+  moment the frozen file is written. Committed alongside the two acceptance files, it is in
+  place before anything is dispatchable — and a human-authored turn is invisible to
+  `turns_since_close` (`is_loop_turn` is false for `author=human`), so it costs the stall
+  budget nothing.
+
+**The stall budget, stated.** Rows 1-4 close cases rather than criteria, so they are four
+consecutive non-closing loop turns; row 5 is the first to write `closed_criterion`. Against
+`STALL_LIMIT = 5` that is **one turn of margin**: any single row among 1-4 costing two turns
+fires the brake before P3's first close. A guard row placed anywhere before row 5 would
+consume that margin outright and make the brake fire by construction; placed after row 5 it
+would be free but would arrive after the moment it exists to protect. Neither is worth it,
+which is the second half of why the guard is a human's commit. The margin does not change
+under this decision, and it is thin: read `turns_since_close(read_all())` before dispatching
+rather than assuming P2 left the counter at zero.
+
+This is P2's lesson repeating, with one difference that makes it more dangerous rather than
+less. `tests/property/**` is writable by a turn and already carries real `[utest->...]`
+tags — `tests/property/test_locate_is_exact.py:39` is one — so the loop can move
+`req~ac-18~1` from `(-impl, -utest)` to absent from the report on its own. **Signal 1 can
+go covered here with no acceptance file in the tree at all**, and covered is not closed.
+
+Whoever writes those two files: `--strict-markers` is on, and `nightly` is declared in
+`pyproject.toml`'s `markers`. A P3 acceptance file without `pytest.mark.nightly` lands in
+the inner ring, where there is no Spark.
+
+**Spark is not a dependency.** `pyproject.toml`'s `[dependency-groups].dev` is hypothesis,
+mypy, pytest, pytest-cov, pytest-timeout, pyyaml and ruff. Grepping `uv.lock` for `pyspark`,
+`delta-spark` and `delta_spark` returns nothing. Both files are frozen. Until that commit
+lands, item 1 has nothing to import and nothing to be type-checked against.
+
+There is a sequencing trap in that commit. `[tool.mypy]` sets `strict = true` over `files
+= ["src", ...]`, and strict includes `--warn-unused-ignores` — measured by listing the
+`strict_flag=True` arguments in `.venv/Lib/site-packages/mypy/main.py` for mypy 1.20.2. A
+`# type: ignore[import-not-found]` on the Spark import is required while pyspark is absent
+and becomes an *unused* ignore, and a red inner ring, the moment it resolves. The ignore
+lives in `src/**`, which is the loop's; the dependency lives in `pyproject.toml`, which is
+a human's. They have to move in the same direction, and they cannot move in the same
+commit.
+
+**No ring runs a nightly-marked test — and the trap is armed and empty.**
+`.github/workflows/nightly.yml` has two jobs, `traceability` (`tools.oft`, `tools.oft
+check-counts`) and `corpus` (`tools.fetch_corpus`); `CLAUDE.md`'s ring table says the same
+in one line. Neither runs pytest, and `ci.yml`'s `uv run pytest` deselects `nightly`.
+Nothing is marked `nightly` today: `pytest --collect-only -m nightly` collects nothing, and
+the tests an inner-ring run deselects are `test_ac10`'s four, marked `external`. So nothing
+is being skipped now — the first test ever marked `nightly` is the one that vanishes, and
+P3's two are it. `.github/**` is frozen, so the job running `uv run pytest -m nightly` is a
+human's commit, and it is the one that has to land **first**: without it the acceptance
+files execute nowhere.
+
+**And the gate that watches `.spec` traffic is currently dark.** The nightly's blocking
+`check-counts` step has not run since 2026-08-24: on run 32812643761, step 7, "The JAR and
+the parser see the same items", is `skipped`, because a failed `Trace` step skips
+everything after it. That is being repaired separately in the same file, but it lands on
+P3, because `check-counts` is the only thing watching the gap `CLAUDE.md` describes —
+`tools/spec_parse.py` is deliberately narrower than OFT, so anything the JAR sees and the
+inner ring does not is unhashed and never `Needs`-checked. P3 is a phase whose whole
+output is new `[impl->...]` and `[utest->...]` tags, which is precisely the traffic that
+moves OFT's `N total` and that `check-counts` exists to reconcile. Do not read a green
+nightly as that gate having passed until step 7 runs again.
+
+### Not in this queue
+
+- **Byte-position location.** `docs/design.md` section 5 puts the span tokeniser first in
+  Camada 3 and marks the whole layer cuttable; section 14 repeats it, and `req~ac-03~1`'s
+  own text says byte position "belongs to layer 3 and is not required here". P3 is where it
+  would be tempting, because a Spark reader has the offsets. It is not a P3 row.
+- **JSON Lines.** Camada 3's second item, cuttable, and section 15 puts `req~ac-15~1` in
+  P6.
+- **AC-08b.** External, out of phase, and Jorge's — see above.
+
 ## Closing rule
 
 An item closes when **both** hold, and neither is something a turn can write:
