@@ -34,14 +34,242 @@ jobs:
       - uses: astral-sh/setup-uv@v10.0.1
         with: { python-version: "3.12" }
       - run: uv sync --all-groups
-      # It GATES from P1 onward. Under P0 `src/` was one __version__ line, every criterion
-      # was legitimately uncovered, and a gate here would have been a red light nobody could
-      # fix -- so this step carried `continue-on-error: true` until the first `[impl->...]`
-      # tag landed. It landed in PR #4 (`src/ingestproof/contracts.py`), and by the close of
-      # P1 the report carries 19 `not ok [` lines against 22 criteria, with ac-01, ac-07 and
-      # ac-09 absent from it. A criterion that goes back to uncovered is now a red night.
+      # It GATES from P1 onward, and it gates on a REGRESSION rather than on a total. Under P0
+      # `src/` was one __version__ line, every criterion was legitimately uncovered, and a gate
+      # here would have been a red light nobody could fix -- so this step carried
+      # `continue-on-error: true` until the first `[impl->...]` tag landed. It landed in PR #4
+      # (`src/ingestproof/contracts.py`).
+      #
+      # e5620c1 removed `continue-on-error` and left the step as `uv run python -m tools.oft`,
+      # whose exit code is the JAR's: 1 whenever ANY criterion is uncovered. 16 of 22 are
+      # uncovered on main and 12 of those belong to P3-P6 (docs/design.md s15), so the absolute
+      # check is unsatisfiable for months. Measured, run 32812643761 of 2026-08-25: red on a
+      # commit where nothing regressed, and the only red in this workflow's twelve-run history
+      # -- and `The JAR and the parser see the same items` below was SKIPPED that night, because
+      # the steps after a failed step do not run, so the only BLOCKING check in the job has not
+      # run since. That is why the step below now carries `if: ${{ !cancelled() }}`: the two
+      # watch different gaps and neither should be able to silence the other.
+      #
+      # The intent the old comment stated -- "a criterion that goes back to uncovered is now a
+      # red night" -- is a REGRESSION check. This is that check: a list of the criteria that are
+      # closed, and a defect against any one of them is the only red.
+      #
+      # Reading the report is the whole trick, and TASKS.md "How signal 1 is read" is the source:
+      # the plain report lists DEFECTS ONLY, so a covered criterion DISAPPEARS from it instead of
+      # becoming an `ok` line. Absence is the pass condition -- which is exactly why this step
+      # refuses to read an absent, empty, truncated or unparseable report as "22 of 22 covered",
+      # and why it does not build anything on the summary's `N total` (which counts every
+      # imported coverage tag as a specobject: 22 criteria read 41 total on main today).
+      #
+      # It writes the state of all 22 criteria to $GITHUB_STEP_SUMMARY BEFORE it decides the
+      # exit code, in this same step, so the run page still answers "where are we" on the night
+      # the gate goes red. That ordering is why this is one step and not two: an `if: always()`
+      # sibling would put the answer behind a condition, and the night it matters is the night
+      # conditions are least worth trusting.
       - name: Trace
-        run: uv run python -m tools.oft
+        # `set +e` in the script below is load-bearing, so the shell is named
+        # here rather than inherited from the runner default.
+        shell: bash
+        run: |
+          set +e            # a grep that finds nothing exits 1, and that is the GOOD case here
+          set -uo pipefail
+
+          # -- THE WATCH LIST --------------------------------------------------------------------
+          # Criteria that are CLOSED. One line each: the id, then a comment for the human.
+          # When a phase closes a criterion, add ONE line here in the same push that merges its
+          # coverage. Deleting a line is how a criterion is deliberately un-watched. Nothing else
+          # in this step ever changes.
+          CLOSED='
+          req~ac-01~1   # P1.1  one declaration in, a whole table out
+          req~ac-07~1   # P1.3  the declaration layer needs no JVM
+          req~ac-09~1   # P1.4  fail-closed promotion and quarantine
+          req~ac-04~1   # P2.1  the dialect is declared, never inferred
+          req~ac-03~1   # P2.3  damage located by record and field
+          req~ac-02a~1  # P2.6  the differential, and the resynchronisation before it
+          '
+          # --------------------------------------------------------------------------------------
+
+          REPORT=oft-report.txt
+          PAGE="${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+          # Every abort goes through here, so the run page is never blank on the night it matters.
+          die() {
+            printf '::error::%s\n' "$*"
+            { printf '## Traceability - nightly\n\n'
+              printf '> [!CAUTION]\n'
+              printf '> **The trace could not be read. Nothing below it can be trusted.**\n'
+              printf '>\n'
+              printf '> %s\n' "$*"
+            } >> "$PAGE"
+            exit 1
+          }
+
+          # Print a newline-terminated list, skipping the blank the terminator leaves behind.
+          # `$( )` strips trailing newlines, so a bare `while read` over a captured list silently
+          # drops its LAST entry -- measured: the first draft of this step rendered 15 of 16.
+          each() { printf '%s\n' "$1" | grep -v '^[[:space:]]*$'; }
+
+          rm -f "$REPORT"                      # a stale report is last night's answer to tonight
+          uv run python -m tools.oft
+          # The exit code is deliberately unread. tools.oft returns the JAR's, which is 1 whenever
+          # ANY criterion is uncovered -- and 1 again when JAVA_HOME is unset and the traceback
+          # never reached the JAR. One code, two meanings. The report is what gets checked instead.
+
+          [ -s "$REPORT" ] || die "$REPORT was not written, or is empty: the trace never produced one."
+
+          # The JAR writes CRLF on Windows and LF on the runner. Normalise once, match once.
+          R=$(tr -d '\r' < "$REPORT")
+
+          TAIL=$(printf '%s\n' "$R" | grep -E '^(not )?ok - [0-9]+ total\b')
+          [ -n "$TAIL" ] || die "$REPORT has no summary line: the JAR was cut off mid-write."
+
+          OFT_TOTAL=$(printf '%s\n'  "$TAIL" | sed -nE 's/^(not )?ok - ([0-9]+) total.*/\2/p')
+          OFT_DIRECT=$(printf '%s\n' "$TAIL" | sed -nE 's/.*[, ]([0-9]+) direct.*/\1/p')
+          OFT_TRANS=$(printf '%s\n'  "$TAIL" | sed -nE 's/.*[, ]([0-9]+) transitive.*/\1/p')
+          OFT_DIRECT=${OFT_DIRECT:-0}
+          OFT_TRANS=${OFT_TRANS:-0}
+
+          # Every defect line, as `id|state`. Two shapes exist and BOTH are measured:
+          #   not ok [ in: .. | out: .. ] req~ac-17~1 (-impl, utest)
+          #   not ok (transitive) [ in: 4 / 4 | out: 0 / 0 ] req~ac-01~1 (dsn, impl, utest)
+          # `[^]]*` swallows the `(transitive)` and the `[` alike, so one pattern reads both.
+          DEFECTS=$(printf '%s\n' "$R" | sed -nE 's/^not ok[^]]*\] ([^ ]+) *(.*)$/\1|\2/p')
+          DEFECT_N=$(printf '%s' "$DEFECTS" | grep -c .)
+
+          # The self-check. If OFT ever changes the shape of a defect line, DEFECTS silently empties
+          # and every watched criterion looks covered -- a gate that is green because it went blind.
+          # The summary line counts the same defects in words, so the two must agree.
+          if [ "$DEFECT_N" -ne "$((OFT_DIRECT + OFT_TRANS))" ]; then
+            die "parsed $DEFECT_N defect lines but the summary says $OFT_DIRECT direct + $OFT_TRANS transitive. The report format moved under this check."
+          fi
+
+          # The denominator. NOT the summary's `N total`: that counts every imported coverage tag as
+          # a specobject (22 criteria read 41 total tonight). The criteria are counted where they are
+          # declared, by the same anchored rule tools/spec_parse.ITEM_ID uses -- a whole line that is
+          # one backticked id -- which is why the prose mention on line 4 of acceptance.md is not one.
+          #
+          # The trailing anchor is `[[:space:]]*$`, NOT `\r?$`, because ITEM_ID ends `\s*$` and so
+          # tolerates trailing whitespace. Measured: one invisible space after `req~ac-01~1` in
+          # acceptance.md leaves OFT at 41 total with ac-01 still covered, spec_parse still at 22,
+          # and needs_check, spec_hashes and check-counts all green -- while `\r?$` counts 21 and
+          # reds the night claiming .spec no longer declares ac-01. `[[:space:]]` also covers the CR
+          # of a CRLF checkout, so the older anchor bought nothing.
+          SPEC_IDS=$(find .spec -name '*.md' -exec cat {} + \
+                     | sed -nE 's/^`(req~[a-z0-9][a-z0-9._-]*~[0-9]+)`[[:space:]]*$/\1/p' | sort -u)
+          CRITERIA=$(printf '%s' "$SPEC_IDS" | grep -c .)
+          [ "$CRITERIA" -gt 0 ] || die ".spec declares no criteria. A watch list over an empty spec passes by reading nothing."
+
+          # `N total` IS usable as a floor: it counts criteria PLUS imported tags, so it can never be
+          # below the criteria count unless the trace failed to read all of .spec.
+          [ "$OFT_TOTAL" -ge "$CRITERIA" ] || die "the trace saw $OFT_TOTAL specobjects but .spec declares $CRITERIA criteria: it did not read the whole spec."
+
+          # Uncovered criteria, in spec order, intersected with what .spec actually declares.
+          UNCOVERED=$(each "$SPEC_IDS" | while IFS= read -r id; do
+            st=$(printf '%s\n' "$DEFECTS" | awk -F'|' -v i="$id" '$1==i {print $2; exit}')
+            [ -n "$st" ] && printf '%s|%s\n' "$id" "$st"
+          done)
+          UNCOVERED_N=$(printf '%s' "$UNCOVERED" | grep -c .)
+          COVERED_N=$((CRITERIA - UNCOVERED_N))
+
+          # The watch list as bare ids: comment stripped, whitespace stripped, blanks dropped, and
+          # DUPLICATES DROPPED. A line repeated by accident is otherwise counted twice in "N watched",
+          # and that is a number a human reads off the run page to decide whether the gate is real.
+          WATCH=$(printf '%s\n' "$CLOSED" | sed -e 's/#.*//' -e 's/[[:space:]]//g' \
+                  | grep -v '^$' | awk '!seen[$0]++')
+
+          # The gate itself. A watched id is in exactly one of three states.
+          REGRESSED=''; HELD=''; STALE=''
+          while IFS= read -r id; do
+            [ -n "$id" ] || continue
+            st=$(printf '%s\n' "$DEFECTS" | awk -F'|' -v i="$id" '$1==i {print $2; exit}')
+            if ! each "$SPEC_IDS" | grep -qxF "$id"; then
+              STALE="${STALE}${id}"$'\n'          # watched, but .spec no longer declares it
+            elif [ -n "$st" ]; then
+              REGRESSED="${REGRESSED}${id}|${st}"$'\n'
+            else
+              HELD="${HELD}${id}"$'\n'            # absent from the report == covered
+            fi
+          done <<WATCHED
+          $WATCH
+          WATCHED
+          WATCHED_N=$(printf '%s%s%s' "$REGRESSED" "$HELD" "$STALE" | grep -c .)
+          REGRESSED_N=$(printf '%s' "$REGRESSED" | grep -c .)
+          STALE_N=$(printf '%s' "$STALE" | grep -c .)
+
+          # -- the run page ----------------------------------------------------------------------
+          {
+            printf '## Traceability - nightly\n\n'
+            printf '**%d of %d acceptance criteria covered.**  %d watched, %d regressed.\n\n' \
+                   "$COVERED_N" "$CRITERIA" "$WATCHED_N" "$REGRESSED_N"
+
+            if [ "$REGRESSED_N" -gt 0 ]; then
+              printf '> [!CAUTION]\n'
+              printf '> **REGRESSION - %d closed criterion(s) went back to uncovered.**\n>\n' "$REGRESSED_N"
+              each "$REGRESSED" | while IFS='|' read -r id st; do
+                printf '> - `%s` is a defect again: `%s`\n' "$id" "$st"
+              done
+              printf '\n'
+            fi
+            if [ "$STALE_N" -gt 0 ]; then
+              printf '> [!CAUTION]\n'
+              printf '> **STALE WATCH - the list names ids `.spec` no longer declares.**\n>\n'
+              each "$STALE" | while IFS= read -r id; do
+                printf '> - `%s` - renamed, revised or deleted; fix the list in `.github/workflows/nightly.yml`\n' "$id"
+              done
+              printf '\n'
+            fi
+
+            printf '### Watched - closed, and must stay closed\n\n'
+            if [ "$WATCHED_N" -eq 0 ]; then
+              printf '_The watch list is empty: this step is gating nothing._\n'
+            else
+              printf '| criterion | tonight |\n|---|---|\n'
+              each "$REGRESSED" | while IFS='|' read -r id st; do
+                printf '| `%s` | **REGRESSED** - `%s` |\n' "$id" "$st"
+              done
+              each "$STALE" | while IFS= read -r id; do
+                printf '| `%s` | **STALE** - not declared in `.spec` |\n' "$id"
+              done
+              each "$HELD" | while IFS= read -r id; do
+                printf '| `%s` | covered |\n' "$id"
+              done
+            fi
+            printf '\n'
+
+            printf '### Not yet built - uncovered, and expected to be\n\n'
+            if [ "$UNCOVERED_N" -eq 0 ]; then
+              printf '_None: every criterion `.spec` declares is covered._\n'
+            else
+              printf '| criterion | the report says | reading |\n|---|---|---|\n'
+              each "$UNCOVERED" | while IFS='|' read -r id st; do
+                case "$st" in
+                  *-impl*-utest*) note='nothing implements it and no test cites it' ;;
+                  *-impl*)        note='a test cites it; nothing implements it' ;;
+                  *-utest*)       note='implemented; no test cites it' ;;
+                  *)              note='partially covered' ;;
+                esac
+                printf '| `%s` | `%s` | %s |\n' "$id" "$st" "$note"
+              done
+            fi
+            printf '\n'
+
+            printf 'A criterion is **covered when it disappears** from the plain report; the report lists defects only. The `%d total` in the summary line is NOT the criteria count -- it counts imported coverage tags too -- so the %d above is counted in `.spec` instead.\n' \
+                   "$OFT_TOTAL" "$CRITERIA"
+          } >> "$PAGE"
+          # --------------------------------------------------------------------------------------
+
+          if [ "$REGRESSED_N" -gt 0 ] || [ "$STALE_N" -gt 0 ]; then
+            each "$REGRESSED" | while IFS='|' read -r id st; do
+              printf '::error::%s was closed and is a defect again: %s\n' "$id" "$st"
+            done
+            each "$STALE" | while IFS= read -r id; do
+              printf '::error::%s is watched but .spec does not declare it; the watch is inert\n' "$id"
+            done
+            exit 1
+          fi
+
+          printf 'traceability: %d of %d covered; all %d watched criteria still closed. %d uncovered, and not one of them is watched.\n' \
+                 "$COVERED_N" "$CRITERIA" "$WATCHED_N" "$UNCOVERED_N"
       # This one BLOCKS, and deliberately so. tools/spec_parse is narrower than OFT, so an
       # item in any other OFT-legal form is visible to the JAR and invisible to the inner
       # ring -- unhashed and never Needs-checked. The counts agreeing is the only thing
@@ -54,6 +282,12 @@ jobs:
       # would go red on the first tag P1 lands and stay red -- a blocking step nobody can
       # fix. Tracing `.spec` alone reads 22 with those same tags in the tree.
       - name: The JAR and the parser see the same items
+        # It must not be skipped by a red Trace. Measured, run 32812643761: the step
+        # above went red and this one -- the only BLOCKING check in the job -- was
+        # skipped, and has been skipped every night since 2026-08-24. The two watch
+        # different gaps and neither should be able to silence the other.
+        # `!cancelled()` rather than `always()`, so a cancelled run stops promptly.
+        if: ${{ !cancelled() }}
         run: uv run python -m tools.oft check-counts
       - uses: actions/upload-artifact@v6
         if: always()
