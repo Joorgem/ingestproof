@@ -33,7 +33,9 @@ jobs:
       # resolve and the run fails at "Set up job". v10.0.1 is the exact v10 release.
       - uses: astral-sh/setup-uv@v10.0.1
         with: { python-version: "3.12" }
-      - run: uv sync --all-groups
+      # OpenFastTrace needs the JVM, not Spark; `tools.fetch_corpus` needs neither. The
+      # 450 MB sdist is the `ring` job's alone.
+      - run: uv sync --all-groups --no-group spark
       # It GATES from P1 onward, and it gates on a REGRESSION rather than on a total. Under P0
       # `src/` was one __version__ line, every criterion was legitimately uncovered, and a gate
       # here would have been a red light nobody could fix -- so this step carried
@@ -308,7 +310,9 @@ jobs:
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v10.0.1
         with: { python-version: "3.12" }
-      - run: uv sync --all-groups
+      # OpenFastTrace needs the JVM, not Spark; `tools.fetch_corpus` needs neither. The
+      # 450 MB sdist is the `ring` job's alone.
+      - run: uv sync --all-groups --no-group spark
       - name: Cache the pinned corpus between nights
         # v5, not v4, and the rule above is what picks it: fetched action.yml at each tag
         # and v4 is `using: node20` -- the deprecated one. v5 is node24, v6 is node24 as
@@ -378,6 +382,9 @@ jobs:
         with: { distribution: temurin, java-version: "17" }
       - uses: astral-sh/setup-uv@v10.0.1
         with: { python-version: "3.12" }
+      # THE ONE SYNC THAT TAKES THE SPARK GROUP. `req~ac-08a~1` runs the check inside
+      # Spark against a local open-source Delta table, so this is the ring that pays the
+      # 450 MB. Every other sync in this repository excludes it.
       - run: uv sync --all-groups
       - name: The nightly ring runs exactly the tests declared here
         # `set +e` in the script below is load-bearing, so the shell is named here rather

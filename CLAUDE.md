@@ -4,7 +4,7 @@ Python **3.12**. On the development machine that is `py -3.12` (3.12.10); the ba
 `python` there is 3.14 and does not serve. `uv` manages everything.
 
 ```bash
-uv sync --all-groups          # create/refresh .venv from uv.lock
+uv sync --all-groups --no-group spark   # create/refresh .venv from uv.lock
 uv run pytest                 # the inner ring: seconds, no JVM, no Spark
 uv run ruff check .
 uv run mypy
@@ -17,6 +17,14 @@ uv run mypy
 | inner | `uv run pytest` | every turn. Seconds. No JVM, no Spark, no network. |
 | nightly | `.github/workflows/nightly.yml` | Linux only. Two jobs: traceability, and the real corpus. |
 | external | by hand | the PyPI release, and the one workspace run. |
+
+**The `spark` dependency group is excluded on purpose, and `--no-group spark` is not
+optional.** pyspark ships no wheel: 4.2.0 is a 450 MB sdist, and so is every release back
+through 3.5, so a plain `uv sync --all-groups` downloads and builds it. Only the nightly
+`ring` job needs Spark and only it syncs without the flag -- which is what keeps the inner
+ring's "no Spark" true of the ENVIRONMENT and not merely of the imports. A turn that finds
+itself wanting Spark locally is a turn taking a nightly row on the wrong machine: that ring
+is Linux only and turns run on Windows.
 
 Markers deselect the outer rings by default (`-m 'not external and not nightly'`), so
 `uv run pytest` is always the inner ring.

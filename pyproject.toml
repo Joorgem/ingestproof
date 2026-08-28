@@ -49,6 +49,22 @@ dev = [
   "ruff>=0.14,<0.15",
 ]
 
+# NOT IN `dev`, AND THE REASON IS A MEASURED NUMBER. pyspark ships no wheel -- 4.2.0 is a
+# 450 MB sdist and every release back through 3.5 is sdist-only -- so a group the inner ring
+# installs costs that download on every push and every pull request. `CLAUDE.md`'s ring table
+# says the inner ring has no Spark, and this keeps that true of the ENVIRONMENT and not only
+# of the imports: `ci.yml` and the two nightly jobs that need no Spark all sync
+# `--all-groups --no-group spark`, and only the nightly `ring` job takes `--all-groups`.
+#
+# It does not weaken `req~ac-07~1`. That file refuses `pyspark` and `py4j` through a
+# meta-path finder in a SUBPROCESS and says so in its own docstring -- "which is what 'with
+# pyspark uninstalled' means, without uninstalling anything from the environment CI just
+# built" -- so the criterion holds whether or not this group is installed.
+spark = [
+  "pyspark>=4.2,<5",
+  "delta-spark>=4.4,<5",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # --strict-markers: a typo in a marker name must fail, not silently deselect.

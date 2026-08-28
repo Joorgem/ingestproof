@@ -34,7 +34,10 @@ jobs:
           python-version: "3.12"
 
       - name: Install
-        run: uv sync --all-groups
+        # `--no-group spark` is load-bearing, not tidiness: pyspark is a 450 MB sdist with no
+        # wheel, and this ring runs on every push and every pull request. The group exists for
+        # the nightly `ring` job and for nothing else.
+        run: uv sync --all-groups --no-group spark
 
       - name: Frozen paths have not drifted
         run: uv run python -m tools.freeze_check verify
