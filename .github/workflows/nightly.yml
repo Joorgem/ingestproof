@@ -323,3 +323,220 @@ jobs:
       # 366 MB over a shared link. Nightly, cached, and never in the inner ring.
       - name: Fetch and verify
         run: uv run python -m tools.fetch_corpus
+  # The pytest ring. It exists because until it does, a test marked `nightly` executes in no
+  # ring at all: `ci.yml`'s `uv run pytest` deselects the marker by construction (`addopts` is
+  # `-m 'not external and not nightly'`) and the two jobs above run `tools.oft` and
+  # `tools.fetch_corpus`, never pytest. Nothing is marked `nightly` today, so the trap is armed
+  # and empty -- the first test ever to carry the marker is the one that would vanish, and P3's
+  # two acceptance files are it.
+  #
+  # WHY THIS IS NOT `run: uv run pytest -m nightly`. Measured on main at 7e39152:
+  #
+  #     $ uv run pytest -m nightly
+  #     480 deselected in 1.42s          -> exit 5, "no tests collected"
+  #
+  # The obvious one-liner is therefore RED from its first night and stays red for as long as
+  # the two acceptance files are unwritten -- which is a gate nobody can fix and everybody
+  # learns to ignore. The other obvious repair, swallowing exit 5, is worse: it is a gate that
+  # passes BY READING NOTHING, and it keeps passing on the night a file that should be in this
+  # ring is not. That is the same defect the `Trace` step's watch list exists to prevent, and
+  # the repair here is the same one -- declare what must hold, and compare.
+  #
+  # SO IT COMPARES, IN BOTH DIRECTIONS, and the second direction is not symmetry for its own
+  # sake:
+  #
+  #   MISSING     declared here and not collected. The file was never written, or it was
+  #               renamed, or it lost its `pytest.mark.nightly`. `--strict-markers` sees none
+  #               of those: it refuses an UNKNOWN marker and says nothing about an ABSENT one.
+  #
+  #   UNDECLARED  collected and not declared here. `tests/unit/**` and `tests/property/**` are
+  #               writable by a turn, and `prompt.md` counts `# pragma: no mutate`,
+  #               `@pytest.mark.skip` and `xfail` into the ledger but NOT `nightly`. Marking a
+  #               test `nightly` is therefore an uncounted way out of the ring that runs every
+  #               turn, into one that runs once a night. This is the only thing looking.
+  #
+  # Measured against the real tree with the drafted `ac-18` file dropped in: declared and
+  # present, `2 passed, 4 xfailed`, exit 0 -- so this job is green on the night the acceptance
+  # file lands and before anything implements it, which is what the conditional strict `xfail`
+  # is for. Same file with its marker stripped: MISSING, exit 1.
+  ring:
+    name: the nightly ring
+    runs-on: ubuntu-latest
+    # The siblings are 15 and 30. Nothing runs here today; what will is Spark against a local
+    # Delta table, so this is sized for that rather than for the empty ring.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      # Pinned by the same rule as the job above: the FIRST major that clears the node20
+      # deprecation, adopting no unrelated behaviour change.
+      #
+      # The JVM is here before anything needs it, deliberately. `req~ac-08a~1` runs Spark, and
+      # Spark is a JVM process. Adding it in the same commit as the ring means the human who
+      # later writes the acceptance file and adds ONE line to the declaration below does not
+      # also have to know that this job needs a step it does not yet use.
+      - uses: actions/setup-java@v5
+        with: { distribution: temurin, java-version: "17" }
+      - uses: astral-sh/setup-uv@v10.0.1
+        with: { python-version: "3.12" }
+      - run: uv sync --all-groups
+      - name: The nightly ring runs exactly the tests declared here
+        # `set +e` in the script below is load-bearing, so the shell is named here rather
+        # than inherited from the runner default.
+        shell: bash
+        run: |
+          # -- THE NIGHTLY RING ------------------------------------------------------------------
+          # Every test file that must be collected by `-m nightly`, one repo-relative path per
+          # line. When a `nightly`-marked file lands, add ONE line here in the same commit --
+          # both files are frozen, so they can only move together anyway. Deleting a line is how
+          # a file leaves this ring deliberately. Nothing else in this step ever changes.
+          #
+          # It is EMPTY, and that is the recorded state rather than an oversight: nothing in the
+          # tree carries `pytest.mark.nightly` today. The two that will are P3's, and they are a
+          # human's commit:
+          #   tests/acceptance/test_ac08a_the_check_runs_inside_spark_against_local_delta.py
+          #   tests/acceptance/test_ac18_the_audit_report_lands_in_a_unity_catalog_table.py
+          NIGHTLY_FILES='
+          '
+          # --------------------------------------------------------------------------------------
+          set +e            # a grep that finds nothing exits 1, and that is a GOOD case here
+          set -uo pipefail
+
+          PAGE="${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+          # Every abort goes through here, so the run page is never blank on the night it matters.
+          die() {
+            printf '::error::%s\n' "$*"
+            { printf '## The nightly ring\n\n'
+              printf '> [!CAUTION]\n'
+              printf '> **The ring could not be read. Nothing below it can be trusted.**\n>\n'
+              printf '> %s\n' "$*"
+            } >> "$PAGE"
+            exit 1
+          }
+
+          # Print a newline-terminated list, skipping the blank the terminator leaves behind.
+          # `$( )` strips trailing newlines, so a bare `while read` over a captured list silently
+          # drops its LAST entry.
+          each() { printf '%s\n' "$1" | grep -v '^[[:space:]]*$'; }
+
+          # The declaration, as bare paths: comment stripped, whitespace stripped, blanks dropped,
+          # DUPLICATES dropped. A line repeated by accident is otherwise counted twice in a number a
+          # human reads off the run page to decide whether this gate is real.
+          DECLARED=$(printf '%s\n' "${NIGHTLY_FILES?the declared list was not set}" \
+                     | sed -e 's/#.*//' -e 's/[[:space:]]//g' | grep -v '^$' | awk '!seen[$0]++' | sort)
+          DECLARED_N=$(printf '%s' "$DECLARED" | grep -c .)
+
+          # -- what the ring ACTUALLY collects ---------------------------------------------------
+          # Deselection happens after collection, so this imports every test module in the tree: an
+          # import error here is a real failure of this gate and not a quiet zero. Measured on pytest
+          # 8.4.2: node ids on their own lines, then a summary; exit 0 with tests, 5 with none, and
+          # 2 on a collection error -- which prints NO summary line at all, so a check that only
+          # counted node ids would read a broken tree as an empty ring.
+          COLLECT=$(uv run pytest -m nightly --collect-only 2>&1)
+          CRC=$?
+          printf '%s\n' "$COLLECT"
+
+          case "$CRC" in
+            0|5) ;;
+            *)   die "\`pytest -m nightly --collect-only\` exited $CRC. The nightly collection could not be read -- an empty ring and a broken tree look alike from here, so this is a red night rather than a green one." ;;
+          esac
+
+          # `path::test` -> `path`. Anchored on the `::` so a stray line in the log cannot enter.
+          # ONE expression, read once. The count the self-check below compares and the file list
+          # the two directions below compare are both derived from `$NODES`, so there is no second
+          # pattern that could drift from this one -- a self-check agreeing with itself while the
+          # comparison it is guarding goes blind is the shape this repository has caught before.
+          NODES=$(printf '%s\n' "$COLLECT" | sed -nE 's/^([^ :]+\.py)::.*$/\1/p')
+          NODES_N=$(printf '%s' "$NODES" | grep -c .)
+          FOUND=$(each "$NODES" | awk '!seen[$0]++' | sort)
+          FOUND_N=$(printf '%s' "$FOUND" | grep -c .)
+
+          # The self-check. If pytest ever changes the shape of a node-id line, FOUND silently empties
+          # and every declared file looks missing -- or, with nothing declared, this gate goes green by
+          # going blind. The summary counts the same items in words, so the two must agree.
+          SUMMARY=$(printf '%s\n' "$COLLECT" | grep -E '(^|[0-9] )(tests? collected|no tests collected)')
+          [ -n "$SUMMARY" ] || die "\`--collect-only\` printed no summary line: its output format moved under this check."
+          if printf '%s' "$SUMMARY" | grep -q 'no tests collected'; then
+            COLLECTED_N=0
+          else
+            COLLECTED_N=$(printf '%s\n' "$SUMMARY" | sed -nE 's#^([0-9]+)(/[0-9]+)? tests? collected.*#\1#p')
+          fi
+          [ -n "$COLLECTED_N" ] || die "could not read a count out of the collection summary: \`$SUMMARY\`"
+          if [ "$NODES_N" -ne "$COLLECTED_N" ]; then
+            die "parsed $NODES_N node ids but the summary says $COLLECTED_N collected. The output format moved under this check."
+          fi
+
+          # -- the two directions ----------------------------------------------------------------
+          # MISSING: declared and not collected. The file was never written, or it lost its
+          # `nightly` marker, or its name moved -- and `--strict-markers` cannot see any of those,
+          # because it refuses an UNKNOWN marker and says nothing about an ABSENT one.
+          MISSING=$(each "$DECLARED" | while IFS= read -r f; do
+            each "$FOUND" | grep -qxF "$f" || printf '%s\n' "$f"
+          done)
+          # UNDECLARED: collected and not declared. `tests/unit/**` and `tests/property/**` are
+          # writable by a turn, and `prompt.md` counts `skip` and `xfail` into the ledger but not
+          # `nightly` -- so marking a test `nightly` is an uncounted way out of the ring that runs
+          # every turn. This is the only thing looking.
+          UNDECLARED=$(each "$FOUND" | while IFS= read -r f; do
+            each "$DECLARED" | grep -qxF "$f" || printf '%s\n' "$f"
+          done)
+          MISSING_N=$(printf '%s' "$MISSING" | grep -c .)
+          UNDECLARED_N=$(printf '%s' "$UNDECLARED" | grep -c .)
+
+          # -- the run page, written BEFORE the exit code is decided ------------------------------
+          {
+            printf '## The nightly ring\n\n'
+            printf '**%d declared, %d collected.**  %d missing, %d undeclared.\n\n' \
+                   "$DECLARED_N" "$FOUND_N" "$MISSING_N" "$UNDECLARED_N"
+            if [ "$MISSING_N" -gt 0 ]; then
+              printf '> [!CAUTION]\n> **MISSING - declared here and not collected by `-m nightly`.**\n>\n'
+              each "$MISSING" | while IFS= read -r f; do
+                printf '> - `%s` - never written, renamed, or it lost its `pytest.mark.nightly`\n' "$f"
+              done
+              printf '\n'
+            fi
+            if [ "$UNDECLARED_N" -gt 0 ]; then
+              printf '> [!CAUTION]\n> **UNDECLARED - collected by `-m nightly` and not declared here.**\n>\n'
+              each "$UNDECLARED" | while IFS= read -r f; do
+                printf '> - `%s` - a test left the inner ring without a human commit\n' "$f"
+              done
+              printf '\n'
+            fi
+            printf '### Declared - and must be collected\n\n'
+            if [ "$DECLARED_N" -eq 0 ]; then
+              printf '_The **nightly ring declares no tests**: this job runs nothing tonight, and that is the recorded state until the first `nightly`-marked file lands._\n\n'
+            else
+              printf '| file | tonight |\n|---|---|\n'
+              each "$DECLARED" | while IFS= read -r f; do
+                if each "$MISSING" | grep -qxF "$f"; then printf '| `%s` | **MISSING** |\n' "$f"
+                else printf '| `%s` | collected |\n' "$f"; fi
+              done
+              printf '\n'
+            fi
+          } >> "$PAGE"
+
+          if [ "$MISSING_N" -gt 0 ] || [ "$UNDECLARED_N" -gt 0 ]; then
+            each "$MISSING"    | while IFS= read -r f; do printf '::error::%s is declared in the nightly ring and was not collected\n' "$f"; done
+            each "$UNDECLARED" | while IFS= read -r f; do printf '::error::%s is collected as nightly and is not declared in the ring\n' "$f"; done
+            exit 1
+          fi
+
+          if [ "$DECLARED_N" -eq 0 ]; then
+            printf 'the nightly ring declares no tests, and none was collected. Nothing to run.\n'
+            exit 0
+          fi
+
+          # -- the run ----------------------------------------------------------------------------
+          # Only reached with at least one declared file collected, so exit 5 is unreachable here and
+          # is treated as the format having moved rather than as a pass.
+          uv run pytest -m nightly
+          RC=$?
+          { printf '### The run\n\n'
+            case "$RC" in
+              0) printf '%d file(s), all green.\n\n' "$DECLARED_N" ;;
+              5) printf '> [!CAUTION]\n> **pytest collected nothing on the run after collecting %d on the dry run.**\n\n' "$COLLECTED_N" ;;
+              *) printf '> [!CAUTION]\n> **The nightly ring is red** (pytest exited %d).\n\n' "$RC" ;;
+            esac
+          } >> "$PAGE"
+          [ "$RC" -eq 0 ] || printf '::error::the nightly ring is red: pytest exited %d\n' "$RC"
+          exit "$RC"
