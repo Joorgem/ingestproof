@@ -402,7 +402,15 @@ jobs:
           # human's commit:
           #   tests/acceptance/test_ac08a_the_check_runs_inside_spark_against_local_delta.py
           #   tests/acceptance/test_ac18_the_audit_report_lands_in_a_unity_catalog_table.py
+          #
+          # The one line below is a THROWAWAY, and it is here rather than in `tests/unit/**`
+          # alone because that path is writable by a turn: a `nightly` marker there is exactly
+          # what UNDECLARED refuses, and declaring it is the only way it runs. It answers one
+          # question -- whether pytest's output capture deadlocks a Spark session launch on
+          # this runner, as it does on the development machine -- and it goes away with the
+          # file in the same commit as the answer. See that file's docstring.
           NIGHTLY_FILES='
+          tests/unit/test_probe_spark_under_pytest_capture.py
           '
           # --------------------------------------------------------------------------------------
           set +e            # a grep that finds nothing exits 1, and that is a GOOD case here
