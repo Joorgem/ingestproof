@@ -18,6 +18,11 @@ count for a file that is meant to be deleted.
 
 WHAT ITS TWO OUTCOMES MEAN.
 
+ANSWERED, run 33225216543 of 2026-08-29: `1 passed, 480 deselected in 42.69s`. Capture does
+NOT deadlock the JVM on the runner; the deadlock is the development machine's. What is still
+open, and is why this file has not been deleted yet, is which Delta coordinate is actually
+resolved -- see the test's own docstring.
+
     passes   pytest's capture does not deadlock the JVM on the runner. The deadlock is the
              development machine's, the ac-08a draft's structure stands, and the numbers it
              prints are the ones that file's docstring should cite.
@@ -43,6 +48,8 @@ FAILURE, so a deadlock lands as a red test rather than as a killed process.
 
 from __future__ import annotations
 
+import os
+import pathlib
 import platform
 import sys
 import time
@@ -50,6 +57,23 @@ import time
 import pytest
 
 pytestmark = [pytest.mark.nightly, pytest.mark.timeout(420)]
+
+
+def _report(line: str) -> None:
+    """Say it where a PASSING test's output survives.
+
+    Measured on run 33225216543: this probe passed in 42.69s and every `print` it made was
+    swallowed -- pytest shows captured stdout only for a FAILING test, and the job's command
+    is `uv run pytest -m nightly` with no `-rA` and no `-s`. The command lives in a frozen
+    file and is a gate; widening it so a throwaway probe can talk would be the probe changing
+    the thing it was written to ask about. `$GITHUB_STEP_SUMMARY` is the runner's own channel
+    for exactly this and costs the gate nothing.
+    """
+    print(line, flush=True)
+    page = os.environ.get("GITHUB_STEP_SUMMARY")
+    if page:
+        with pathlib.Path(page).open("a", encoding="utf-8") as handle:
+            handle.write("- " + line + "\n")
 
 
 def test_a_spark_session_starts_and_delta_round_trips_under_capture(tmp_path) -> None:
@@ -70,10 +94,10 @@ def test_a_spark_session_starts_and_delta_round_trips_under_capture(tmp_path) ->
     from delta import configure_spark_with_delta_pip
     from pyspark.sql import SparkSession
 
-    print(f"platform: {platform.platform()}", flush=True)
-    print(f"python: {sys.version.split()[0]}", flush=True)
-    print(f"pyspark: {pyspark.__version__}", flush=True)
-    print(f"delta-spark: {getattr(delta, '__version__', 'unknown')}", flush=True)
+    _report(f"platform: {platform.platform()}")
+    _report(f"python: {sys.version.split()[0]}")
+    _report(f"pyspark: {pyspark.__version__}")
+    _report(f"delta-spark: {getattr(delta, '__version__', 'unknown')}")
 
     builder = (
         SparkSession.builder.master("local[1]")
@@ -87,13 +111,13 @@ def test_a_spark_session_starts_and_delta_round_trips_under_capture(tmp_path) ->
         .config("spark.sql.shuffle.partitions", "1")
     )
     configured = configure_spark_with_delta_pip(builder)
-    print("builder configured; asking for the session now", flush=True)
+    _report("builder configured; asking for the session now")
 
     session = configured.getOrCreate()
     session.sparkContext.setLogLevel("ERROR")
     launched = time.monotonic()
-    print(f"session up in {launched - started:.1f}s", flush=True)
-    print(f"jars.packages: {session.conf.get('spark.jars.packages', '(unset)')}", flush=True)
+    _report(f"session up in {launched - started:.1f}s")
+    _report(f"jars.packages: {session.conf.get('spark.jars.packages', '(unset)')}")
 
     try:
         location = (tmp_path / "probe").as_posix()
@@ -104,6 +128,6 @@ def test_a_spark_session_starts_and_delta_round_trips_under_capture(tmp_path) ->
         back = session.read.format("delta").load(location).where("k = 'a'").collect()
 
         assert sorted(row.v for row in back) == ["one", "three"], back
-        print(f"delta round trip done at {time.monotonic() - started:.1f}s", flush=True)
+        _report(f"delta round trip done at {time.monotonic() - started:.1f}s")
     finally:
         session.stop()
