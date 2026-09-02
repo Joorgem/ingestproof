@@ -33,8 +33,25 @@ from ingestproof.report import DamageFound
 # a report whose coordinates name nothing a producer can find in their own file.
 STAMPS = (BATCH_ID_COLUMN, CONTRACT_ID_COLUMN, REJECTED_BY_COLUMN)
 
+# The driver holds the whole batch, because `detect` compares positionally and `report`'s
+# own docstring refuses to read either stream twice -- so both sides are in memory by
+# design, and the source already is, out of `parse_records`.
+#
+# THE CAP REFUSES; IT DOES NOT TRUNCATE. A review suggested bounding the batch and that is
+# the right worry with the wrong repair: comparing a PREFIX of a batch publishes a clean
+# report over records nobody looked at, and carries a denominator that says otherwise. That
+# is the exact failure `req~ac-05~1` exists to prevent, and it would be introduced by the
+# fix rather than by the bug. So an oversized batch is a loud refusal.
+MAX_RECORDS = 1_000_000
 
-def check_batch(source: bytes, dialect: object, location: str, batch_id: str) -> None:
+
+def check_batch(
+    source: bytes,
+    dialect: object,
+    location: str,
+    batch_id: str,
+    max_records: int = MAX_RECORDS,
+) -> None:
     """Compare one batch's landed reading against the source, and fail the task on damage.
 
     PROMOTE UNION QUARANTINE, NOT PROMOTE. The batch is every row carrying this
@@ -63,7 +80,8 @@ def check_batch(source: bytes, dialect: object, location: str, batch_id: str) ->
       false against a real corpus, the fix is a position stamp written at read time -- and
       that is a new acceptance file and a human's commit, not a quiet sort added here.
 
-    Raises `DamageFound` when the readings differ, and returns None when they agree.
+    Raises `DamageFound` when the readings differ, `ValueError` when the batch is larger
+    than `max_records`, and returns None when the readings agree.
     """
     # `delta` is NOT imported. Reading `format("delta")` needs Delta on the session's
     # classpath, which is the job's configuration rather than this module's import: a
@@ -82,6 +100,17 @@ def check_batch(source: bytes, dialect: object, location: str, batch_id: str) ->
 
     frame = session.read.format("delta").load(location)
     batch = frame.filter(frame[BATCH_ID_COLUMN] == batch_id).drop(*STAMPS)
+
+    # Counted before it is collected, so an oversized batch is a message rather than a
+    # driver that dies mid-collect with a stack trace naming nothing.
+    size = batch.count()
+    if size > max_records:
+        raise ValueError(
+            f"batch {batch_id!r} holds {size} records and the cap is {max_records}. "
+            "This check compares whole batches -- it will not compare a prefix, because a "
+            "report over records nobody read is a clean verdict that means nothing. Raise "
+            "`max_records` deliberately, or split the batch upstream."
+        )
 
     landed = tuple(_as_record(row) for row in batch.collect())
     differential = detect(source, dialect, landed)

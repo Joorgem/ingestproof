@@ -147,6 +147,12 @@ def _ingestproof_imports(source: str) -> set[str]:
     `spark` -- the exact reachability this test exists to refuse.
     """
     found: set[str] = set()
+
+    def take(dotted: str) -> None:
+        parts = dotted.split(".")
+        if parts[0] == "ingestproof" and len(parts) > 1:
+            found.add(parts[1])
+
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.ImportFrom) and node.module:
             parts = node.module.split(".")
@@ -158,9 +164,16 @@ def _ingestproof_imports(source: str) -> set[str]:
                 found.update(alias.name for alias in node.names)
         elif isinstance(node, ast.Import):
             for alias in node.names:
-                parts = alias.name.split(".")
-                if parts[0] == "ingestproof" and len(parts) > 1:
-                    found.add(parts[1])
+                take(alias.name)
+        elif isinstance(node, ast.Call):
+            # The dynamic forms, for the same reason `_imported_roots` reads them: a
+            # reachable module calling `importlib.import_module("ingestproof.spark")` is
+            # importing it, and a closure blind to that is a closure with a hole exactly
+            # where somebody would put one. Literal arguments only -- a name built at
+            # runtime is the limit the frozen subprocess covers, pinned above.
+            for argument in node.args:
+                if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
+                    take(argument.value)
     return found
 
 
