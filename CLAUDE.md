@@ -109,6 +109,7 @@ These are the libraries it calls:
 | `loop.ledger.append` | one row per turn, appended programmatically |
 | `loop.render_loop_md` | `LOOP.md`, a view of that ledger and never a source |
 | `loop.run_turn.stall_report` | five loop turns closing nothing stops the loop |
+| `tools.freeze_check.verify` | whether a frozen path moved during the turn -- the only thing that catches a `Bash` write, measured |
 | `tools.review_resolution.partition` | which review findings the turn's diff actually resolved |
 
 `loop.ledger.append` is the one that must never go through an editor, and that is

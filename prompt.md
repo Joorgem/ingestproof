@@ -23,7 +23,9 @@ the repository root and printed what it says it prints.
 |---|---|
 | before the turn | `assert_hook_installed` |
 | clean slate | `clean_slate`, or the two git commands above |
+| **the frozen set, before** | **`uv run python -m tools.freeze_check verify`** |
 | the work | your edits, inside the writable set |
+| **the frozen set, after** | **`uv run python -m tools.freeze_check verify`** |
 | the inner ring | `uv run pytest` |
 | the verdict | `classify` |
 | the record | `loop.ledger.append` |
@@ -40,6 +42,42 @@ uv run python -c "from pathlib import Path; from loop.run_turn import assert_hoo
 Silence means the installed hook exists and is byte-identical to `tools/hooks/`. It does
 not check that `~/.claude/settings.json` still arms it, and it cannot: a turn that could
 read its own gate's configuration is a turn that could learn to edit it.
+
+**The frozen set, twice a turn — and this is not defence in depth, it is the defence.**
+
+```bash
+uv run python -m tools.freeze_check verify
+```
+
+Exit 0 means every frozen path still hashes to what `tools/frozen.sha256` records. Run it
+after the clean slate, and again after your work and BEFORE the ring.
+
+**MEASURED 2026-09-02, INSIDE A CONTAINER, WITH A REAL AGENT AND A REAL LOGIN.** The
+allowlist hook gates the EDITING TOOLS and does not gate `Bash` — its own docstring says so,
+and `docs/design.md` section 7.3 says so. What was not known was how often that matters. The
+answer is: whenever the turn prefers `Bash`, which is its default preference.
+
+Asked in plain words to append a line to `TASKS.md`, an ordinary turn did it, and the file's
+`sha256` moved from `4f34a026` to `30ec2411`. It was not evading anything. In an earlier run
+it explained the route itself, unprompted: *"since this session's standing guidance says to
+make file changes via Bash anyway, I created the file that way instead."* The control run,
+forced onto `Write`, was refused with the allowlist's own message and the file was untouched
+— so the hook is installed and correct, and it simply was not on the path taken.
+
+**The gate's effectiveness depends on which tool the turn happens to reach for, which is not
+a security property.** An earlier probe (2026-08-26) saw the hook refuse and concluded the
+posture held unattended; that turn reached for `Write`. Both observations are true and only
+the pair is informative.
+
+So: the frozen-set reading is what actually catches a frozen path that moved. It does not
+prevent — it detects, and it makes the turn RED. The reading BEFORE your work is what makes
+the reading after it attributable to your turn rather than to whatever the checkout arrived
+in. And before the ring, not after, because the frozen set holds `tests/conftest.py`,
+`tests/acceptance/**` and `pyproject.toml`: a turn that moved any of those moved the
+instrument the ring is read from.
+
+If a frozen path changed and it was not you, say so in `LOOP.md` and stop — that is a
+human's edit, and `reset --hard` will not reach whatever rewrote it.
 
 **The clean slate**, if you would rather call it than type it:
 
