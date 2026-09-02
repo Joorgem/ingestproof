@@ -136,22 +136,99 @@ def test_the_import_check_cannot_see_these_and_the_subprocess_is_what_covers_the
     assert not _imported_roots(source).intersection(_frozen_banned())
 
 
-def test_no_module_in_the_shipped_package_imports_spark_at_any_depth() -> None:
-    # Every `.py` under `src/ingestproof/`, not just `rules.py`: `rules.py` imports
-    # `ingestproof.contracts`, so a lazy Spark import there would be invisible to a
-    # one-file scan while still reaching the declaration layer.
+def _ingestproof_imports(source: str) -> set[str]:
+    """The `ingestproof.X` submodules `source` imports, at any nesting depth.
+
+    THREE SPELLINGS, AND THE THIRD IS THE ONE THAT MADE THE FIRST DRAFT OF THIS INERT.
+    `from ingestproof.spark import x` and `import ingestproof.spark` both carry the
+    submodule in the dotted name. `from ingestproof import spark` does not: its
+    `node.module` is bare `ingestproof` and the submodule is an ALIAS. A version that read
+    only the dotted forms was measured green against a `contracts.py` that imported
+    `spark` -- the exact reachability this test exists to refuse.
+    """
+    found: set[str] = set()
+
+    def take(dotted: str) -> None:
+        parts = dotted.split(".")
+        if parts[0] == "ingestproof" and len(parts) > 1:
+            found.add(parts[1])
+
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            parts = node.module.split(".")
+            if parts[0] != "ingestproof":
+                continue
+            if len(parts) > 1:
+                found.add(parts[1])
+            else:  # `from ingestproof import spark`
+                found.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                take(alias.name)
+        elif isinstance(node, ast.Call):
+            # The dynamic forms, for the same reason `_imported_roots` reads them: a
+            # reachable module calling `importlib.import_module("ingestproof.spark")` is
+            # importing it, and a closure blind to that is a closure with a hole exactly
+            # where somebody would put one. Literal arguments only -- a name built at
+            # runtime is the limit the frozen subprocess covers, pinned above.
+            for argument in node.args:
+                if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
+                    take(argument.value)
+    return found
+
+
+def _reachable_from(*roots: str) -> set[str]:
+    """Transitive closure of `ingestproof.*` imports, as module stems."""
+    seen: set[str] = set()
+    queue = list(roots)
+    while queue:
+        name = queue.pop()
+        if name in seen:
+            continue
+        path = PACKAGE / f"{name}.py"
+        if not path.is_file():
+            continue
+        seen.add(name)
+        queue.extend(_ingestproof_imports(path.read_text(encoding="utf-8")))
+    return seen
+
+
+def test_nothing_the_declaration_layer_reaches_imports_spark_at_any_depth() -> None:
+    """The invariant is REACHABILITY, and it used to be checked by a proxy that expired.
+
+    This scanned every `.py` under `src/ingestproof/`, and the reason it gave was
+    reachability in as many words: `rules.py` imports `ingestproof.contracts`, so a lazy
+    Spark import there would be invisible to a one-file scan "while still reaching the
+    declaration layer". Scanning everything was a correct proxy while EVERY module was
+    reachable.
+
+    `ingestproof.spark` is the first module that is deliberately not. `req~ac-08a~1` asks
+    for a Spark entry point, so that module must import `pyspark`, and the old shape called
+    that a violation. An exemption by filename would have been the cheap repair and the
+    wrong one: an exemption is a hole the next module can widen by being added to a list.
+
+    So the closure is COMPUTED and the exemption has to be EARNED. `spark.py` is allowed to
+    import Spark only for as long as nothing the declaration layer reaches imports IT --
+    and the second assertion is what holds that, so the day someone makes `contracts` or
+    `rules` import `spark`, this goes red rather than quietly widening.
+    """
     banned = set(_frozen_banned())
-    modules = sorted(PACKAGE.glob("*.py"))
-    names = {path.name for path in modules}
+    reachable = _reachable_from("rules", "contracts")
 
-    # A superset rather than an exact list: the scan covers whatever the package holds, so
-    # pinning the filenames would break on every module that joins it and say nothing. The
-    # three named here are the ones `import ingestproof.rules` actually reaches, and the
-    # assertion exists so the loop below cannot be vacuously green over an empty glob.
-    assert names >= {"__init__.py", "contracts.py", "rules.py"}
+    # Not vacuous: the closure must at least contain what `import ingestproof.rules` really
+    # walks, or an empty set below would pass while proving nothing.
+    assert reachable >= {"rules", "contracts"}, reachable
 
-    for path in modules:
-        assert _imported_roots(path.read_text(encoding="utf-8")).isdisjoint(banned), path.name
+    for name in sorted(reachable):
+        source = (PACKAGE / f"{name}.py").read_text(encoding="utf-8")
+        assert _imported_roots(source).isdisjoint(banned), name
+
+    # THE EXEMPTION, EARNED RATHER THAN DECLARED. `spark.py` may import Spark exactly
+    # because it is outside the closure above; this is the assertion that keeps that true.
+    assert "spark" not in reachable, (
+        "the declaration layer now reaches `ingestproof.spark`, which imports pyspark -- "
+        "`req~ac-07~1` proves the declaration layer needs no JVM and this closes that door"
+    )
 
 
 # --- what the module accepts -------------------------------------------------------------

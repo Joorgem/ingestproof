@@ -71,6 +71,29 @@ class Misaligned(Exception):
 # ring. A value that can never change the answer reads like one that can, so it is gone and
 # the tail says `None` directly.
 
+class DamageFound(Exception):
+    """The landed reading is not the source, and the task must fail.
+
+    Carries the whole report rather than a message, because the caller that catches this is
+    a job whose next act is to record WHAT differed, not to print that something did. A
+    message would force every consumer to re-derive the damages by parsing prose.
+
+    It is an exception rather than a return value for the reason `req~ac-08a~1` states in
+    its own words -- the check "fails the task". A Spark job that returns a verdict nobody
+    reads is a job that succeeds while the data is wrong, and this library exists because
+    that is the failure mode nobody notices.
+
+    `report` is deliberately untyped here. `Differential` lives in `ingestproof.differential`
+    which imports THIS module, so naming the type would close an import cycle; and every
+    consumer wants the same two attributes, `damages` and `records_compared`, which both
+    `Report` and `Differential` carry.
+    """
+
+    def __init__(self, report: object) -> None:
+        super().__init__("the landed reading differs from the source")
+        self.report = report
+
+
 @dataclass(frozen=True)
 class Damage:
     """One value that differs, and where it is.
