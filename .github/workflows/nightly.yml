@@ -61,7 +61,8 @@ jobs:
       # becoming an `ok` line. Absence is the pass condition -- which is exactly why this step
       # refuses to read an absent, empty, truncated or unparseable report as "22 of 22 covered",
       # and why it does not build anything on the summary's `N total` (which counts every
-      # imported coverage tag as a specobject: 22 criteria read 41 total on main today).
+      # imported coverage tag as a specobject: 22 criteria read 43 total on main today, and
+      # read 41 before P3's two acceptance files added a `[utest->...]` tag each).
       #
       # It writes the state of all 22 criteria to $GITHUB_STEP_SUMMARY BEFORE it decides the
       # exit code, in this same step, so the run page still answers "where are we" on the night
@@ -146,7 +147,7 @@ jobs:
           fi
 
           # The denominator. NOT the summary's `N total`: that counts every imported coverage tag as
-          # a specobject (22 criteria read 41 total tonight). The criteria are counted where they are
+          # a specobject (22 criteria read 43 total tonight). The criteria are counted where they are
           # declared, by the same anchored rule tools/spec_parse.ITEM_ID uses -- a whole line that is
           # one backticked id -- which is why the prose mention on line 4 of acceptance.md is not one.
           #
@@ -330,9 +331,9 @@ jobs:
   # The pytest ring. It exists because until it does, a test marked `nightly` executes in no
   # ring at all: `ci.yml`'s `uv run pytest` deselects the marker by construction (`addopts` is
   # `-m 'not external and not nightly'`) and the two jobs above run `tools.oft` and
-  # `tools.fetch_corpus`, never pytest. Nothing is marked `nightly` today, so the trap is armed
-  # and empty -- the first test ever to carry the marker is the one that would vanish, and P3's
-  # two acceptance files are it.
+  # `tools.fetch_corpus`, never pytest. P3'S TWO ACCEPTANCE FILES HAVE SINCE LANDED and they
+  # are the first tests ever to carry the marker, so the trap this job sets is no longer armed
+  # and empty: it is armed and loaded, and the declaration below names what it holds.
   #
   # WHY THIS IS NOT `run: uv run pytest -m nightly`. Measured on main at 7e39152:
   #
@@ -360,15 +361,20 @@ jobs:
   #               turn, into one that runs once a night. This is the only thing looking.
   #
   # Measured against the real tree with the drafted `ac-18` file dropped in: declared and
-  # present, `2 passed, 4 xfailed`, exit 0 -- so this job is green on the night the acceptance
+  # present, `2 passed, 4 xfailed`, exit 0 -- the LANDED file is `2 passed, 5 xfailed`, one
+  # case having been added in its last round -- so this job is green on the night the acceptance
   # file lands and before anything implements it, which is what the conditional strict `xfail`
   # is for. Same file with its marker stripped: MISSING, exit 1.
   ring:
     name: the nightly ring
     runs-on: ubuntu-latest
-    # The siblings are 15 and 30. Nothing runs here today; what will is Spark against a local
-    # Delta table, so this is sized for that rather than for the empty ring.
-    timeout-minutes: 30
+    # The siblings are 15 and 30. THIRTEEN TESTS RUN HERE NOW -- P3's two acceptance files --
+    # and 45 rather than 30 is arithmetic rather than padding: `test_ac08a_...` sets
+    # `SPARK_BUDGET = 600` on three tests, and 3 x 600s IS 30 minutes exactly, before
+    # `uv sync --all-groups` builds the 450 MB pyspark sdist below. At 30 the job cap fires
+    # first in the slow case and the per-test `Timeout` -- the legible failure SPARK_BUDGET
+    # exists to produce -- could never be reported. Measured cost on a real runner: 42.69s.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
       # Pinned by the same rule as the job above: the FIRST major that clears the node20
@@ -397,12 +403,15 @@ jobs:
           # both files are frozen, so they can only move together anyway. Deleting a line is how
           # a file leaves this ring deliberately. Nothing else in this step ever changes.
           #
-          # It is EMPTY, and that is the recorded state rather than an oversight: nothing in the
-          # tree carries `pytest.mark.nightly` today. The two that will are P3's, and they are a
-          # human's commit:
-          #   tests/acceptance/test_ac08a_the_check_runs_inside_spark_against_local_delta.py
-          #   tests/acceptance/test_ac18_the_audit_report_lands_in_a_unity_catalog_table.py
+          # IT WAS EMPTY UNTIL P3'S TWO ACCEPTANCE FILES LANDED, and the two lines below are
+          # them. While it was empty the trap this step exists to spring was armed and could
+          # not fire: nothing in the tree carried `pytest.mark.nightly`, so a file that lost
+          # its marker looked exactly like the recorded state. It no longer does -- from this
+          # commit on, a P3 acceptance file that stops being collected by `-m nightly` is a
+          # declared line with nothing behind it, and this step is red.
           NIGHTLY_FILES='
+          tests/acceptance/test_ac08a_the_check_runs_inside_spark_against_local_delta.py
+          tests/acceptance/test_ac18_the_audit_report_lands_in_a_unity_catalog_table.py
           '
           # --------------------------------------------------------------------------------------
           set +e            # a grep that finds nothing exits 1, and that is a GOOD case here

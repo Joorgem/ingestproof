@@ -67,9 +67,17 @@ Both of P3's gates are `Ring: nightly` in `.spec/acceptance.md`. That does not c
 closes an item, but it changes where the second signal is produced and who may record it —
 see the ring note below.
 
-**No row here is dispatchable yet.** Three commits on frozen paths have to land first and
+~~**No row here is dispatchable yet.** Three commits on frozen paths have to land first and
 none of them exists; they are under "What P3 is owed". A turn that takes row 1 today has
-nothing to import and no test to turn green.
+nothing to import and no test to turn green.~~
+
+**THE THREE COMMITS HAVE LANDED AND ROW 1 IS DISPATCHABLE.** The `spark` dependency group in
+`c9182b1`'s sibling `014eb48`, the `ring` job in `c9182b1`, and the two acceptance files in
+the commit that struck this paragraph. What a turn taking row 1 now has: `pyspark` and
+`delta-spark` resolvable, `tests/acceptance/test_ac08a_...py` red under `--runxfail` waiting
+for `ingestproof.spark`, and a nightly ring that executes it. **Read the closing rule at the
+bottom before dispatching anyway** — the two signals are unchanged, and signal 2 is still
+produced in no turn's own test run.
 
 | # | task | who | closes when |
 |---|---|---|---|
@@ -202,13 +210,19 @@ that diagnosis would be false.
 
 ### What P3 is owed before any item here can close
 
-Three commits, all on frozen paths, all a human's. None of them exists today.
+~~Three commits, all on frozen paths, all a human's. None of them exists today.~~
+**All three have landed.** This subsection is kept because it is the reasoning that produced
+them, and because every constraint it states on HOW the two files assert is still binding —
+the constraints outlived the debt. What follows is struck where it describes a tree that no
+longer exists and left standing where it states a rule.
 
-**The two frozen acceptance tests do not exist.** `tests/acceptance/` holds nine files —
+~~**The two frozen acceptance tests do not exist.** `tests/acceptance/` holds nine files —
 `test_ac01`, `test_ac02a`, `test_ac03`, `test_ac04`, `test_ac07`, `test_ac09`, `test_ac10`,
 `test_ac17` and `test_frozen_pins` — and `tools/frozen.sha256` lists exactly those nine.
-Nothing cites `req~ac-08a~1` or `req~ac-18~1`. `tests/acceptance/**` is frozen by
-`tools/frozen.txt`, so those two files are a human's commit, unwritten and undrafted:
+Nothing cites `req~ac-08a~1` or `req~ac-18~1`.~~ It holds **eleven**, the manifest lists
+**49 frozen paths**, and both ids are cited — which is why `oft-report.txt` now reads
+`(-impl, utest)` for both rather than `(-impl, -utest)`. `tests/acceptance/**` is frozen by
+`tools/frozen.txt`, so those two files were a human's commit:
 
 - `tests/acceptance/test_ac08a_the_check_runs_inside_spark_against_local_delta.py`
 - `tests/acceptance/test_ac18_the_audit_report_lands_in_a_unity_catalog_table.py`
@@ -241,7 +255,31 @@ red inner ring. The precedent is in the tree: `tests/unit/test_allowlist_hook.py
 properties of a frozen gate from the writable side, and its docstring says so in as many
 words.
 
-**That guard belongs in the human's acceptance-file commit, not in a row of this queue**,
+**IT LANDED, IN THAT COMMIT, AS
+`tests/unit/test_ac18_asserts_the_emitter_not_the_committed_bundle.py`.** Do not write a
+second one: this paragraph reads as an imperative and it is discharged. The reasoning below
+is NOT struck -- it is why the guard was a human's commit rather than a queue row, and that
+argument holds unchanged; only its tense moves.
+
+**It took four versions, and the three failures were one failure.** A token check that
+`POISONED_ENVIRONMENT`'s `DATABRICKS_HOST` satisfied; then a name check that survived
+`_bundle_path` being hollowed to a tmp path; then a check on which tokens sat in which
+subtrees, which a one-character `.yml` -> `.yaml` walked past. **Every one of them read the
+SOURCE of the machinery instead of asking what the machinery does.** The version that landed
+calls `_bundle_path()` and looks at the path that comes back, and RUNS the frozen case
+against a staged bundle it then hand-edits. Static reading survives only for what neither a
+call nor a run can reach: a fixture that rebinds the resolver after import, and a marker
+condition hardcoded to a constant. Its own
+docstring lists, measured, the four classes of spelling it does NOT catch.
+
+**And the fourth version was wrong about its own remaining half.** It said reading the case's
+source was "the one thing a call cannot show". A call shows it: stage a bundle that IS the
+emitter's output and the frozen case must pass, hand-edit that bundle and it must fail. Ten
+one-line edits satisfied the static approximation while leaving a case that could not fail on
+a hand edit -- `assert raw == raw` among them. **Run the case, do not read it** is the whole
+lesson of this guard, and it took four rounds to apply it to both halves instead of one.
+
+**That guard belonged in the human's acceptance-file commit, not in a row of this queue**,
 for two reasons that are both mechanical rather than stylistic:
 
 - **A row closing no criterion cannot close at all.** Nothing in `.spec/acceptance.md`
@@ -276,10 +314,17 @@ Whoever writes those two files: `--strict-markers` is on, and `nightly` is decla
 `pyproject.toml`'s `markers`. A P3 acceptance file without `pytest.mark.nightly` lands in
 the inner ring, where there is no Spark.
 
-**Spark is not a dependency.** `pyproject.toml`'s `[dependency-groups].dev` is hypothesis,
+~~**Spark is not a dependency.** `pyproject.toml`'s `[dependency-groups].dev` is hypothesis,
 mypy, pytest, pytest-cov, pytest-timeout, pyyaml and ruff. Grepping `uv.lock` for `pyspark`,
 `delta-spark` and `delta_spark` returns nothing. Both files are frozen. Until that commit
-lands, item 1 has nothing to import and nothing to be type-checked against.
+lands, item 1 has nothing to import and nothing to be type-checked against.~~
+
+**It is one now, and NOT in `dev`.** `014eb48` added a separate `spark` group —
+`pyspark>=4.2,<5`, `delta-spark>=4.4,<5` — because pyspark ships no wheel and the 450 MB
+sdist would be downloaded on every push if the inner ring installed it. `ci.yml` and the two
+nightly jobs that need no Spark sync `--all-groups --no-group spark`; only the nightly `ring`
+job takes `--all-groups`. So "the inner ring has no Spark" is now true of the ENVIRONMENT and
+not only of the imports.
 
 There is a sequencing trap in that commit. `[tool.mypy]` sets `strict = true` over `files
 = ["src", ...]`, and strict includes `--warn-unused-ignores` — measured by listing the
@@ -290,16 +335,24 @@ lives in `src/**`, which is the loop's; the dependency lives in `pyproject.toml`
 a human's. They have to move in the same direction, and they cannot move in the same
 commit.
 
-**No ring runs a nightly-marked test — and the trap is armed and empty.**
+~~**No ring runs a nightly-marked test — and the trap is armed and empty.**
 `.github/workflows/nightly.yml` has two jobs, `traceability` (`tools.oft`, `tools.oft
 check-counts`) and `corpus` (`tools.fetch_corpus`); `CLAUDE.md`'s ring table says the same
 in one line. Neither runs pytest, and `ci.yml`'s `uv run pytest` deselects `nightly`.
 Nothing is marked `nightly` today: `pytest --collect-only -m nightly` collects nothing, and
-the tests an inner-ring run deselects are `test_ac10`'s four, marked `external`. So nothing
-is being skipped now — the first test ever marked `nightly` is the one that vanishes, and
-P3's two are it. `.github/**` is frozen, so the job running `uv run pytest -m nightly` is a
-human's commit, and it is the one that has to land **first**: without it the acceptance
-files execute nowhere.
+the tests an inner-ring run deselects are `test_ac10`'s four, marked `external`.~~
+
+**`c9182b1` added a third job, `ring`, and it runs `uv run pytest -m nightly`.** It does not
+run that bare, and the reason is in its own comment: a bare run exits 5 on an empty
+collection, which is indistinguishable from a run whose tests all lost their marker. So the
+job carries a DECLARED LIST of the files that must be collected and compares it against what
+pytest actually collects, failing in both directions — declared-and-missing, and
+collected-and-undeclared. **A `nightly` file therefore lands in two frozen files at once**,
+its own and `nightly.yml`, and they can only move together.
+
+Measured after P3's two landed: `pytest --collect-only -m nightly` collects **13** (6 from
+`ac-08a`, 7 from `ac-18`), an inner-ring run deselects **17**, and the ring is green at
+`4 passed, 9 xfailed` — the nine being work no turn has done yet, red under `--runxfail`.
 
 **And the gate that watches `.spec` traffic is currently dark.** The nightly's blocking
 `check-counts` step has not run since 2026-08-24: on run 32812643761, step 7, "The JAR and

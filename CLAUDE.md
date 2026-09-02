@@ -15,7 +15,7 @@ uv run mypy
 | ring | command | when |
 |---|---|---|
 | inner | `uv run pytest` | every turn. Seconds. No JVM, no Spark, no network. |
-| nightly | `.github/workflows/nightly.yml` | Linux only. Two jobs: traceability, and the real corpus. |
+| nightly | `.github/workflows/nightly.yml` | Linux only. **Three** jobs: traceability, the real corpus, and `ring` -- `uv run pytest -m nightly` against a declared list of files. |
 | external | by hand | the PyPI release, and the one workspace run. |
 
 **The `spark` dependency group is excluded on purpose, and `--no-group spark` is not
